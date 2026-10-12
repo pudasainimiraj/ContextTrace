@@ -4,32 +4,12 @@ import type { JobRecord } from "../shared/api.ts";
 import worker from "../worker/index.ts";
 import { createJob, enqueueJob, getJob, type JobMessage } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
-import { repoFixture } from "./helpers.ts";
+import { fakeMessage, repoFixture, type FakeMessage } from "./helpers.ts";
 
 // Runs against the real Supabase project; see jobs.test.ts for the id scheme.
 const REPO_ID = Date.now() * 100 + 60;
 const db = createDb(env);
 const silentQueue = { send: async () => {} };
-
-type FakeMessage = {
-  id: string;
-  timestamp: Date;
-  body: unknown;
-  attempts: number;
-  ack: ReturnType<typeof vi.fn<() => void>>;
-  retry: ReturnType<typeof vi.fn<(options?: QueueRetryOptions) => void>>;
-};
-
-function fakeMessage(body: unknown, attempts = 1): FakeMessage {
-  return {
-    id: crypto.randomUUID(),
-    timestamp: new Date(),
-    body,
-    attempts,
-    ack: vi.fn<() => void>(),
-    retry: vi.fn<(options?: QueueRetryOptions) => void>(),
-  };
-}
 
 /** Delivers the messages to the Worker's queue handler the way the runtime would. */
 async function deliver(messages: FakeMessage[]): Promise<void> {

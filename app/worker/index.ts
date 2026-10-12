@@ -27,7 +27,7 @@ export default {
     const db = createDb(env);
     const owner = `consumer:${crypto.randomUUID()}`;
     for (const message of batch.messages) {
-      await consumeJobMessage(db, message, owner);
+      await consumeJobMessage(db, message, owner, env.JOBS_QUEUE);
     }
   },
 } satisfies ExportedHandler<Env, JobMessage>;

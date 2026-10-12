@@ -25,6 +25,7 @@ export type JobRecord = {
   attempt: number;
   lease_owner: string | null;
   lease_until: string | null;
+  next_attempt_at: string | null;
   error_code: string | null;
   error_message: string | null;
   created_at: string;
