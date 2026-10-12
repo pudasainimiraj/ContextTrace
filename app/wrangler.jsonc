@@ -1,0 +1,33 @@
+/**
+ * Wrangler configuration.
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "contexttrace",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-10-06",
+	"assets": {
+		"not_found_handling": "single-page-application",
+		// Direct navigations to /api/* must reach the Worker, not the SPA fallback.
+		"run_worker_first": ["/api/*"]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "contexttrace",
+			// Placeholder for local dev and tests. Replace with the id printed by
+			// `npx wrangler d1 create contexttrace` before the first remote deploy.
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+	/**
+	 * Secrets (GITHUB_TOKEN) are not declared here.
+	 * Local: app/.env (see .env.example). Remote: `npx wrangler secret put GITHUB_TOKEN`.
+	 */
+}

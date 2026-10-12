@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "document_id": "github:dagster-io/dagster:issue:4194",
+  "repository": "dagster-io/dagster",
+  "type": "issue",
+  "number": 4194,
+  "title": "Remove pkg_resources in favor of importlib.resources, etc.",
+  "source_url": "https://github.com/dagster-io/dagster/issues/4194",
+  "fetched_at": "2026-10-10T22:56:07Z",
+  "generated_at": "2026-10-11T10:39:28Z",
+  "tokenizer": "cl100k_base",
+  "max_tokens": 512,
+  "passage_count": 1,
+  "skipped_empty_units": 0,
+  "passages": [
+    {
+      "passage_id": "github:dagster-io/dagster:issue:4194:body:0",
+      "document_id": "github:dagster-io/dagster:issue:4194",
+      "title": "Remove pkg_resources in favor of importlib.resources, etc.",
+      "source_url": "https://github.com/dagster-io/dagster/issues/4194",
+      "source_unit": "opening_body",
+      "comment_id": null,
+      "author": "mgasner",
+      "created_at": "2021-05-20T16:37:20Z",
+      "locator": "Opening body",
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "token_count": 46,
+      "text": "As the docs for pkg_resources note:\n\n```Use of pkg_resources is discouraged in favor of importlib.resources, importlib.metadata, and their backports (resources, metadata). Please consider using those libraries instead of pkg_resources.```",
+      "text_kind": "normalized_markdown"
+    }
+  ]
+}

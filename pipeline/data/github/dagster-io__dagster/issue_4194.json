@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "document_id": "github:dagster-io/dagster:issue:4194",
+  "repository": "dagster-io/dagster",
+  "type": "issue",
+  "number": 4194,
+  "source_url": "https://github.com/dagster-io/dagster/issues/4194",
+  "fetched_at": "2026-10-10T22:56:07Z",
+  "issue": {
+    "number": 4194,
+    "title": "Remove pkg_resources in favor of importlib.resources, etc.",
+    "state": "open",
+    "author": "mgasner",
+    "author_association": "CONTRIBUTOR",
+    "created_at": "2021-05-20T16:37:20Z",
+    "updated_at": "2023-08-14T22:20:13Z",
+    "closed_at": null,
+    "labels": [
+      "dependencies",
+      "tech-debt",
+      "area: resource"
+    ],
+    "html_url": "https://github.com/dagster-io/dagster/issues/4194",
+    "body": "As the docs for pkg_resources note:\r\n\r\n```Use of pkg_resources is discouraged in favor of importlib.resources, importlib.metadata, and their backports (resources, metadata). Please consider using those libraries instead of pkg_resources.```",
+    "comments_count": 0
+  },
+  "comments": []
+}
