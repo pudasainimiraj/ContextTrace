@@ -1,0 +1,12 @@
+{
+  "type": "discussion",
+  "document_id": "github:example/project:discussion:10",
+  "discussion": {
+    "title": "Why we replaced the old API",
+    "author": "ann",
+    "created_at": "2024-10-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/discussions/10",
+    "body": "We considered keeping the old API.\nHowever, its deployment requirements made customization difficult.\n\nWe considered a plugin system next.\nHowever, plugins would have doubled the test matrix.\n\nWe chose a single configurable client.\nIt keeps one code path and one test suite."
+  },
+  "comments": []
+}

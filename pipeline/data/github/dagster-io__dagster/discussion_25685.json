@@ -1,0 +1,156 @@
+{
+  "schema_version": "1.0",
+  "document_id": "github:dagster-io/dagster:discussion:25685",
+  "repository": "dagster-io/dagster",
+  "type": "discussion",
+  "number": 25685,
+  "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+  "fetched_at": "2026-10-11T10:36:19Z",
+  "discussion": {
+    "number": 25685,
+    "title": "Step Launchers supersession announcement",
+    "category": "Community",
+    "author": "danielgafni",
+    "author_association": "CONTRIBUTOR",
+    "created_at": "2024-11-01T19:17:42Z",
+    "updated_at": "2025-07-18T14:58:05Z",
+    "html_url": "https://github.com/dagster-io/dagster/discussions/25685",
+    "body": "# StepLauncher supersession announcement\r\n\r\n# TLDR\r\n\r\nThe [StepLauncher](https://docs.dagster.io/_apidocs/internals#step-launchers-experimental) is being superseded with [Dagster Pipes](https://docs.dagster.io/concepts/dagster-pipes). We recommend users start exploring Dagster Pipes and consider migrating (see the [Spark example](https://docs.dagster.io/guides/migrations/from-step-launchers-to-pipes#migrating-from-spark-step-launchers-to-dagster-pipes)) existing `StepLauncher` usages to Pipes. While `StepLauncher` will remain available, this feature will no longer be receiving active development. \r\n\r\nUsers who prefer Step Launchers to Pipes because of some features like `IOManager` integration are welcome to do so, given they accept the increased development and deployment complexity.\r\n\r\n# Context\r\n\r\n`StepLauncher` was an experimental Dagster resource which could be used to run Dagster steps in remote environments such as Spark. The following step launchers were implemented:\r\n\r\n- `dagster_databricks.databricks_pyspark_step_launcher`\r\n- `dagster_aws.emr.emr_pyspark_step_launcher`\r\n\r\nThe goal of step launchers was to seamlessly execute Dagster code in Spark or another remote environment. In particular, a `StepLauncher` is responsible for: \r\n\r\n1. Setting up the remote environment - uploading Dagster code and installing dependencies\r\n2. Executing the `op/asset` remotely\r\n3. Fetching logs and Dagster events from the remote process and making them available to Dagster.\r\n\r\nHowever, this power came at the cost of **significant implementation complexity** and **feature coupling**. If you've been using step launchers, especially in Spark, you might wonder why we're moving away from this approach. Historically, we tried to integrate business logic and orchestration in external runtimes like Spark using framework-level abstractions. While `StepLauncher` aimed to make remote execution easier, it faced several challenges that made adoption difficult:\r\n\r\n- **Rigid Code Structure**: You had to structure your deployed code around Dagster code locations and definitions, which could be impractical if you had existing Spark jobs or dependency conflicts.\r\n- **Deployment Limitations**: `StepLauncher` managed code deployment at runtime, which often conflicted with DevOps processes. Many users preferred managing deployments during push time instead.\r\n- **Complex Customization**: Writing custom step launchers was complex, making them difficult to extend and use effectively.\r\n- **Runtime dependencies**: The `StepLauncher` required to have `dagster` installed in the remote environment, which might introduce version conflicts or increase the complexity of the deployment process.\r\n- **Usage with other programming languages**: because of the previous point, it was not possible to use `StepLauncher` with programming languages other than Python, which is a blocker for popular Scala/Java Spark workloads.\r\n\r\nFor those who do not want to structure their Spark business logic around Dagster definitions, we believe that Dagster Pipes -- a more composable and lightweight solution -- is the right path forward.\r\n\r\n# Dagster Pipes\r\n\r\nDagster Pipes is a wire **protocol** that handles **parameter/context passing** to the remote process, and **log/metadata gathering** from the remote process. This approach aligns better with Dagster's philosophy of modularity and extensibility, enabling users to create more flexible and powerful remote execution solutions, albeit with some additional setup responsibility. \r\n\r\nSome of the improvements over `StepLauncher` are:\r\n\r\n➕ **Increased composability**: Pipes components can be mixed and matched, allowing for use in a wide variety of environments.\r\n\r\n➕ **Decreased complexity**: individual Pipes components can be implemented and tested in isolation, making it easier to develop and maintain custom solutions. This modular approach allows for greater flexibility and adaptability to specific use cases.\r\n\r\n➕ **Improved extensibility**: Users can easily extend the existing existing family of Pipes components to meet their unique requirements, fostering a more diverse ecosystem of integrations.\r\n\r\n➕ **Lightweight**: Pipes can execute unmodified scripts. In order to send additional Dagster events (such as Dagster metadata or asset check results) back to the orchestration process, a zero-dependency (and single-file) `dagster-pipes` Python package can be installed in the remote environment. \r\n\r\n➕ **Language-agnostic**: Implementing Dagster Pipes in additional programming languages is very tractable. Dagster customers have already done this. Right now we only have an official implementation for Python, but we will be adding support to more languages in the near future (JVM languages being in progress). \r\n\r\nAs Pipes are more lightweight and give you greater control, they also come with some responsibilities:\r\n\r\n➖ **Pipes do not automatically set up the remote environment**. This responsibility now falls to the user, typically handled through CI/CD processes.\r\n\r\n➖ **Pipes to not automatically execute `op/asset` body**. Instead, the users are typically expected to provide an external script which will be launched by Pipes.\r\n\r\n# Pipes Clients\r\n\r\nWe have implemented a set of opinionated Pipes clients on top of the Pipes framework for some popular services. \r\n\r\n- [Subprocess](https://docs.dagster.io/_apidocs/pipes#dagster.PipesSubprocessClient)\r\n- [Docker](https://docs.dagster.io/_apidocs/libraries/dagster-docker#dagster_docker.PipesDockerClient)\r\n- [Kubernetes](https://docs.dagster.io/_apidocs/libraries/dagster-k8s#dagster_k8s.PipesK8sClient) (via Pod)\r\n- [Databricks](https://docs.dagster.io/_apidocs/libraries/dagster-databricks#dagster_databricks.PipesDatabricksClient)\r\n- [AWS Lambda](https://docs.dagster.io/_apidocs/libraries/dagster-aws#dagster_aws.pipes.PipesLambdaClient)\r\n- [AWS Glue](https://docs.dagster.io/_apidocs/libraries/dagster-aws#dagster_aws.pipes.PipesGlueClient)\r\n- [AWS ECS](https://docs.dagster.io/_apidocs/libraries/dagster-aws#dagster_aws.pipes.PipesECSClient)\r\n- [AWS EMR Serverless](https://docs.dagster.io/_apidocs/libraries/dagster-aws#dagster_aws.pipes.PipesEMRServerlessClient)\r\n- [AWS EMR](https://docs.dagster.io/_apidocs/libraries/dagster-aws#dagster_aws.pipes.PipesEMRClient)\r\n\r\n---\r\n\r\nReferences\r\n\r\n- [Spark Step Launchers -> Pipes migration guide](https://docs.dagster.io/guides/migrations/from-step-launchers-to-pipes#migrating-from-spark-step-launchers-to-dagster-pipes)",
+    "comments_count": 2,
+    "answer_comment_id": null
+  },
+  "comments": [
+    {
+      "id": 11160550,
+      "author": "dinis-rodrigues",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2024-11-05T23:53:51Z",
+      "updated_at": "2024-11-06T00:02:58Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11160550",
+      "body": "This will imply major major breaking changes in the future. From the release notes the step launcher:\r\n>will not be removed from the codebase until Dagster 2.0 is released\r\n\r\nMeaning that from v2 support it could be removed entirely.\r\nOrganizations currently using step launchers and io_managers (like us) will need to refactor the entire codebase to work with dagster pipes.\r\n\r\nYes the step launcher has its drawbacks, but it is easily customizable (like dagster pipes), by extending its class in my opinion.\r\nIf we compare the two, the boiler plate code which is needed to setup dagster pipes, rounds up to the same as a custom inherited step launcher.\r\n\r\nAnd the biggest drawback of them all is the deprecation of io_manager with dagster pipes. For example, many spark jobs rely on intermediate outputs (instead of cache) to optimize the spark job. We for example, have intermediate outputs in all jobs, because we have complex queries which require this optimization.\r\n\r\nHaving to configure each op with a hardcoded \"io_manager\" in the end / beginning, just to make things work, is just friction to developers.\r\n\r\nI think the idea behind dagster pipes is good, but it feels like we had a battletested steplauncher and now we are \"obligated\" to use a new less-featured almost blank canvas tool. For newcomers in dagster, this might be okay, but for existing users, its a barrier.\r\n\r\nIf the step launcher had its flaws, it should've been a matter of improving the existing solution, instead of building from the ground up a new one and making existing workflows deprecated.\r\n\r\nMaybe this opinion is due to my lack of experience and experimentation with pipes, but just the thought of having to refactor everything, makes me demotivated just to try it\r\n\r\n",
+      "is_answer": false,
+      "reply_to": null
+    },
+    {
+      "id": 11168919,
+      "author": "danielgafni",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2024-11-06T16:49:54Z",
+      "updated_at": "2024-11-08T15:24:50Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11168919",
+      "body": "Hey! \r\n\r\nThank you for the feedback, that's exactly why this discussion was created. \r\n\r\n> will not be removed from the codebase until Dagster 2.0 is released\r\n\r\nThis wording was poor, I'll make sure to change it. Two points here: \r\n\r\n1. We don't have any timeline or plans for Dagster 2.0. This means this can be considered as a very distant point in time. \r\n2. Actually, we aren't aiming to remove Step Launchers even in 2.0. There are no reasons for doing this. So you could keep using them as long as you'd like to. After all, they are just normal resources (just like Pipes) and aren't dependent on any specific framework features. We are planning to stop active development of Step Launchers, but they aren't going anywhere.\r\n\r\n> Having to configure each op with a hardcoded \"io_manager\" in the end / beginning, just to make things work, is just friction to developers.\r\n\r\nI very much agree with that. I'll let @schrockn elaborate \r\n\r\nCC @yuhan feedback above ^^ ",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 11189899,
+      "author": "schrockn",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2024-11-08T14:36:37Z",
+      "updated_at": "2024-11-08T14:36:38Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11189899",
+      "body": "@dinis-rodrigues thanks for the feedback.\r\n\r\nFor people like yourselves who are \"all in\" on step launchers to the point of building their own step launchers, our recommendation is *not* to port to Pipes. It is working for you now. For people who are willing commit to step launchers and to have it own deployment, install dagster in the remote environment, etc, step launchers provide more features. We will clarify the wording of the discussion on this point.\r\n\r\n\r\n\r\n",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 11190104,
+      "author": "dinis-rodrigues",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2024-11-08T14:58:26Z",
+      "updated_at": "2024-11-08T14:58:48Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11190104",
+      "body": "Let me just clarify that I'm all for it on the new dagster-pipes features. I would love to see those same features on step launchers without losing the io_manager, for example.\r\n\r\nWe extended the functionality of the existing step launchers to achieve some extra/custom functionality.\r\nWe are all-in on step launchers because we have been all-in on dagster from the beginning. Step launchers were what was available, and we just built from that.\r\n\r\nWe've been closely following the new features, and I just raised this awareness because of possible major refactoring.\r\nIn the near future we want and will use/extend dagster-pipes. But with the io_manager \"issue\", it's not feasible at the moment.",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 11865680,
+      "author": "jmccartin",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-01-17T11:05:04Z",
+      "updated_at": "2025-01-17T11:05:06Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11865680",
+      "body": "Hi, just come across this discussion after a ticket I was watching was closed, and this was referenced.\r\n\r\nWe are in the same boat as @dinis-rodrigues, our company makes use of remote execution on Azure Databricks quite heavily, with a somewhat complex chain of custom IO managers to handle data loading and writes. I haven't looked too deeply into dagster-pipes, but from the sounds of it, our codebase would be very difficult to port over. I would be fine continuing to use the current step launchers, but there is some long-term concern regarding the Databricks SDK (the existing step launcher is built on a deprecated SDK version). If there is no longer going to be active development from the core team, would it be up to the community to take over? It would be good to get an idea of how many people/teams are affected by this.",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 11866506,
+      "author": "danielgafni",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-01-17T12:33:15Z",
+      "updated_at": "2025-01-17T12:33:16Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11866506",
+      "body": "1. re: switching to Pipes in your case - you are right about it probably being too complicated right now. I suggest you stay on Step Launchers. Perhaps in the future Pipes could become more compatible with IOManagers which will make it easier for you to switch. \r\n2. re: community taking over `StepLauncher` support - potentially, I don't see serious obstacles to that, but it's better if @yuhan or @schrockn could answer to this question ",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 11972122,
+      "author": "jmccartin",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-01-27T16:18:43Z",
+      "updated_at": "2025-01-27T16:18:44Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-11972122",
+      "body": "Any update on this? I notice that the documentation for the step launcher is essentially now [removed](https://docs.dagster.io/api/python-api/libraries/dagster-databricks#step-launcher), and the line \"usage is discouraged\" seems to conflict with what you guys are saying here.\r\n\r\nShould I just create a fork of the library and see how far I get with regards to updating it for the new SDK version?",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 12046558,
+      "author": "danielgafni",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-02-03T19:25:32Z",
+      "updated_at": "2025-02-03T19:25:32Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-12046558",
+      "body": "Hey @jmccartin! \r\n\r\nWe've updated the wording [here](https://github.com/dagster-io/dagster/pull/27508). It should be aligned with this thread now. \r\n\r\nAs for your other question:\r\n\r\n> If there is no longer going to be active development from the core team, would it be up to the community to take over?\r\n\r\n let's see if maybe @cmpadden @yuhan have an answer? ",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 12046735,
+      "author": "schrockn",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-02-03T19:42:04Z",
+      "updated_at": "2025-02-03T19:42:05Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-12046735",
+      "body": "Just to expand on this, @jmccartin thanks for the feedback here and as @danielgafni we've updated the docs to clarify the state of things.\r\n\r\nTo provide additional context and framing, Pipes is a \"one step backwards two step forwards\" type of situation. Pipes actually has _less_ features than step launchers when it comes to executing on systems like Spark. But Pipes is easier to use, more composable, and more architecturally sound. For most people step launchers were just too hard to use and customize, and step launchers were too presumptuous about taking over responsibility for deploying code.\r\n\r\nOur plan moving forward to build features that stack on top of Pipes to allow users to separate I/O and compute in the same way that I/O managers do today (and would likely be backwards compatible with I/O managers). We think this approach would be more flexible and composable: E.g. you could be able to deploy the transforms to a remote cluster without having to bring in _all_ of dagster.\r\n\r\nUntil we have such a capability we will not eliminate or abandon Step Launchers. New users have much more success with Pipes so we are driving them towards that, hence the messaging. If you are one of the intrepid souls that have successfully bought into step launchers, it's quite a magical experience, and we don't want to take that away. We look forward to bringing similar capabilities to a broader audience in the future.",
+      "is_answer": false,
+      "reply_to": 11160550
+    },
+    {
+      "id": 13776158,
+      "author": "jtv8",
+      "author_association": "NONE",
+      "created_at": "2025-07-16T11:24:46Z",
+      "updated_at": "2025-07-16T11:24:46Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-13776158",
+      "body": "Weighing in here as someone who evaluated both Pipes and Step Launchers and purposely chose Step Launchers: the Pipes experience is the _exact opposite_ of what I want.\r\n\r\n- It requires you to split your asset definitions into two Python files in two separate locations, one with your metadata and dependencies and the other with your actual asset code. The fact that you _don't_ normally have to do this is one of the key selling points of Dagster.\r\n- You can't locally test your code as a single artefact in the same way you could with `no_step_launcher`.\r\n- It does not deploy your code for you and requires you to develop a whole additional CI/CD process to push your code to Databricks (I disagree with the argument that this is a deployment activity, any more than you \"deploy\" SQL to a database when you execute it).\r\n- It requires you to wrap your code in boilerplate just to do simple things like read parameters and report asset materializations, rather than doing what Dagster is good at: leveraging simple Python functions.\r\n- It does not appear to support I/O managers at all - these are perhaps the most useful feature in Dagster for platform teams who want to create abstractions to standardise how assets are read and written.\r\n\r\nIn summary: What I _really_ want is a way to write Spark assets as simple Python functions, and I want to do it in a way that's completely agnostic of the execution environment - as an asset developer, most of the time, I don't want to handle low-level code for configuring and communicating with that execution environment. Those are concerns for platform developers. Until it's possible to use Pipes in such a way, I can't see myself recommending it.\r\n\r\nIf anything, it would be preferable to go in completely the _opposite_ direction and implement a fully fledged run launcher for environments like Databricks and cut out the Kubernetes job entirely, if such a thing were possible. But absent that, I'll continue to use Step Launchers for as long as they're supported - and if we were forced to use Pipes in the future, we would probably end up building our own abstractions that make them work exactly how Step Launchers do now.",
+      "is_answer": false,
+      "reply_to": null
+    },
+    {
+      "id": 13806209,
+      "author": "schrockn",
+      "author_association": "CONTRIBUTOR",
+      "created_at": "2025-07-18T13:23:13Z",
+      "updated_at": "2025-07-18T13:23:14Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-13806209",
+      "body": "Hey @jtv8 thanks for the thoughtful commentary. We understand completely that for people who are fully bought into that entire stack, Step Launchers provided a pretty compelling end-to-end product experience.\r\n\r\nFor Spark and Databricks specifically we are _very_ excited about Spark/Databricks connect and are very actively looking at working on this. We have customers that already use it to great effect.\r\n\r\nWith Connect, we think we will be able to provide a true best-of-both-worlds experience, allowing you to keep your business logic in Dagster but do actual execution on remote clusters without having to manage deployment at all. Step Launchers are completely unnecessary in that world, but you get the lightweight functional API you desire.\r\n\r\nMy recommendation for you is the following: continue using step launchers and i/o managers since you are getting value out of them. As our Connect integration matures, you should be able to move that quite easily and eliminate step launchers entirely, which is a more robust approach the leverages more of the built-in capabilities in Spark/Databricks.",
+      "is_answer": false,
+      "reply_to": 13776158
+    },
+    {
+      "id": 13807067,
+      "author": "jtv8",
+      "author_association": "NONE",
+      "created_at": "2025-07-18T14:58:04Z",
+      "updated_at": "2025-07-18T14:58:05Z",
+      "html_url": "https://github.com/dagster-io/dagster/discussions/25685#discussioncomment-13807067",
+      "body": "Hi @schrockn - thanks for sharing that! Leveraging Databricks Connect would make perfect sense - it would separate concerns properly between Dagster as an orchestrator and Databricks as a compute environment, and would provide a consistent experience whether the code is running in Dagster or a local development environment. Also, I suspect it would improve cluster spin-up times quite a bit, which is always a big pain point with Databricks.\r\n\r\nI'll recommend to my team that you we do what you suggested, and I'll keep an eye out for the Databricks Connect integration!",
+      "is_answer": false,
+      "reply_to": 13776158
+    }
+  ]
+}

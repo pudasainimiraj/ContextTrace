@@ -1,0 +1,297 @@
+{
+  "schema_version": "1.0",
+  "repository": "dagster-io/dagster",
+  "reviewed_at": "2026-10-10",
+  "document_definition": "Thread-level source container. Each passage identifies an individual source unit; these selected passages all derive from opening bodies.",
+  "passage_count": 20,
+  "limitations": [
+    "Curated paraphrases, not verbatim chunks or a completed automated chunking dataset.",
+    "Issue #4194 supports a replacement proposal, not completed removal.",
+    "Historical discussions explain historical decisions; API guidance may have changed.",
+    "No claim that discussion reuse terms have been reviewed."
+  ],
+  "documents": [
+    {
+      "number": 4194,
+      "type": "issue",
+      "title": "Remove pkg_resources in favor of importlib.resources, etc.",
+      "author": "mgasner",
+      "date": "2021-05-20T16:37:20Z",
+      "question": "Why was pkg_resources removed?",
+      "answer_status": "proposal_only_removal_not_established",
+      "answer": "The issue cites guidance discouraging pkg_resources in favor of importlib alternatives. It does not establish removal.",
+      "document_id": "github:dagster-io/dagster:issue:4194",
+      "source_url": "https://github.com/dagster-io/dagster/issues/4194",
+      "passages": [
+        {
+          "passage_id": "github:dagster-io/dagster:issue:4194:curated:0",
+          "document_id": "github:dagster-io/dagster:issue:4194",
+          "source_url": "https://github.com/dagster-io/dagster/issues/4194",
+          "source_unit": "opening_body",
+          "author": "mgasner",
+          "created_at": "2021-05-20T16:37:20Z",
+          "locator": "Opening body",
+          "text": "The proposal cites documentation discouraging pkg_resources and recommending importlib.resources, importlib.metadata, or their backports.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why was pkg_resources removed?"
+        }
+      ]
+    },
+    {
+      "number": 21343,
+      "type": "discussion",
+      "title": "Freshness Policy -> Freshness Checks migration guide",
+      "author": "dpeng817",
+      "date": "2024-04-22",
+      "question": "Why did Dagster replace FreshnessPolicy with freshness checks?",
+      "answer_status": "rationale_supported",
+      "answer": "The guide describes confusing data-time calculations, alert fatigue, and automation behavior; checks provide customization using an existing concept.",
+      "document_id": "github:dagster-io/dagster:discussion:21343",
+      "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+      "passages": [
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:0",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body",
+          "text": "FreshnessPolicy was deprecated in favor of asset-check factories for evaluating freshness.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:1",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "The previous data-time calculation was inflexible and confusing; checks allow easier overrides.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:2",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Overdue indicators contributed to alert fatigue and confusing auto-materialization behavior.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:3",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Representing freshness through asset checks reuses existing alerts, UI, and insights.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:4",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "The change aimed to reduce the concepts needed to operate Dagster.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:5",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "For time-partitioned assets, the old policy required all completed partitions before the deadline.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:6",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "The replacement time-partition check evaluates the latest expected partition, irrespective of earlier partitions.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:7",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "The replacement derives the expected partition from a cron schedule instead of requiring a separate lag parameter.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:21343:curated:8",
+          "document_id": "github:dagster-io/dagster:discussion:21343",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/21343",
+          "source_unit": "opening_body",
+          "author": "dpeng817",
+          "created_at": "2024-04-22",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "An overdue evaluation becomes a failed asset check. The guide distinguished freshness checks from automation-rule replacements.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster replace FreshnessPolicy with freshness checks?"
+        }
+      ]
+    },
+    {
+      "number": 25685,
+      "type": "discussion",
+      "title": "Step Launchers supersession announcement",
+      "author": "danielgafni",
+      "date": "2024-11-01",
+      "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?",
+      "answer_status": "rationale_supported",
+      "answer": "The announcement identifies coupling, deployment complexity, remote dependencies, and customization constraints. Pipes favors modular remote execution with more user responsibility.",
+      "document_id": "github:dagster-io/dagster:discussion:25685",
+      "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+      "passages": [
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:0",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body",
+          "text": "StepLauncher combined remote setup, execution, and event collection, creating implementation complexity and feature coupling.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:1",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "StepLauncher required deployed code to follow Dagster definitions, complicating existing Spark jobs.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:2",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Runtime code deployment could conflict with teams preferring deployment through CI/CD.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:3",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Custom step launchers were difficult to implement and extend.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:4",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Remote Dagster installation introduced dependency and version-management complexity.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:5",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "StepLauncher’s Python dependency constrained Scala and Java Spark workloads.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:6",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Pipes separates context transfer and event collection into composable protocol components.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:7",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Individual Pipes components can be implemented and tested independently.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:8",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Pipes can run unmodified scripts; richer event reporting uses the lightweight dagster-pipes package.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        },
+        {
+          "passage_id": "github:dagster-io/dagster:discussion:25685:curated:9",
+          "document_id": "github:dagster-io/dagster:discussion:25685",
+          "source_url": "https://github.com/dagster-io/dagster/discussions/25685",
+          "source_unit": "opening_body",
+          "author": "danielgafni",
+          "created_at": "2024-11-01",
+          "locator": "Opening body; locate by concepts in text",
+          "text": "Pipes leaves remote environment setup and external scripts to users. The announcement allows continued StepLauncher use for capabilities such as IOManager integration.",
+          "text_kind": "human_curated_paraphrase",
+          "question": "Why did Dagster move toward Pipes instead of continuing with Step Launchers?"
+        }
+      ]
+    }
+  ]
+}
