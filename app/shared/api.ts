@@ -23,6 +23,8 @@ export type JobRecord = {
   state: string;
   generation: number;
   attempt: number;
+  lease_owner: string | null;
+  lease_until: string | null;
   error_code: string | null;
   error_message: string | null;
   created_at: string;
