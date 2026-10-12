@@ -11,11 +11,11 @@
     "test": "vitest run",
     "preview": "npm run build && vite preview",
     "deploy": "npm run build && wrangler deploy",
-    "cf-typegen": "wrangler types",
-    "db:migrate:local": "wrangler d1 migrations apply contexttrace --local",
-    "db:migrate:remote": "wrangler d1 migrations apply contexttrace --remote"
+    "cf-typegen": "wrangler types --env-file .env.example",
+    "db:push": "supabase db push --workdir .. --db-url \"$SUPABASE_DB_URL\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.117.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

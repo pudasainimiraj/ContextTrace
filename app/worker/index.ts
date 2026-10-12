@@ -1,7 +1,7 @@
 import type { ApiError } from "../shared/api.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
-import { getRepository, upsertRepository } from "./repositories.ts";
+import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -33,7 +33,7 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
   const lookup = await lookupPublicRepository(parsed, { token: env.GITHUB_TOKEN || undefined });
   if (lookup.kind !== "ok") return lookupError(lookup);
 
-  const { row, created } = await upsertRepository(env.DB, lookup.repo);
+  const { row, created } = await upsertRepository(createDb(env), lookup.repo);
   return created
     ? json(row, { status: 201, headers: { Location: `/api/repositories/${row.id}` } })
     : json(row);
@@ -41,7 +41,7 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
 
 /** GET /api/repositories/:id */
 async function getRepositoryById(env: Env, id: number): Promise<Response> {
-  const row = await getRepository(env.DB, id);
+  const row = await getRepository(createDb(env), id);
   return row ? json(row) : error(404, "not_found", "Repository is not registered");
 }
 

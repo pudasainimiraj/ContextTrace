@@ -12,22 +12,16 @@
 		// Direct navigations to /api/* must reach the Worker, not the SPA fallback.
 		"run_worker_first": ["/api/*"]
 	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "contexttrace",
-			// Placeholder for local dev and tests. Replace with the id printed by
-			// `npx wrangler d1 create contexttrace` before the first remote deploy.
-			"database_id": "00000000-0000-0000-0000-000000000000",
-			"migrations_dir": "migrations"
-		}
-	],
+	"vars": {
+		// Public project URL. The secret key is a secret, not a var (see .env.example).
+		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
+	},
 	"observability": {
 		"enabled": true
 	},
 	"upload_source_maps": true
 	/**
-	 * Secrets (GITHUB_TOKEN) are not declared here.
-	 * Local: app/.env (see .env.example). Remote: `npx wrangler secret put GITHUB_TOKEN`.
+	 * Secrets (SUPABASE_SECRET_KEY, GITHUB_TOKEN) are not declared here.
+	 * Local: app/.env (see .env.example). Remote: `npx wrangler secret put <NAME>`.
 	 */
 }

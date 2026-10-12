@@ -1,36 +1,38 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord } from "../shared/api.ts";
 import type { GitHubRepo } from "./github-api.ts";
 
-// One atomic upsert keyed by GitHub's repo id. A repeated submission refreshes
-// the name columns and bumps submission_count instead of inserting a second row,
-// so a concurrent double submit yields exactly one "created" result.
-const UPSERT_SQL = `
-INSERT INTO repositories (id, owner, name, full_name, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
-  owner = excluded.owner,
-  name = excluded.name,
-  full_name = excluded.full_name,
-  updated_at = excluded.updated_at,
-  submission_count = repositories.submission_count + 1
-RETURNING *`;
+/** Server-side Supabase client. The secret key bypasses RLS; never expose it to the browser. */
+export function createDb(env: Pick<Env, "SUPABASE_URL" | "SUPABASE_SECRET_KEY">): SupabaseClient {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
 
+/**
+ * Registers a repository keyed by GitHub's repo id through the register_repository
+ * function (one atomic INSERT ... ON CONFLICT). A repeated submission refreshes the
+ * name columns and bumps submission_count instead of inserting a second row.
+ */
 export async function upsertRepository(
-  db: D1Database,
+  db: SupabaseClient,
   repo: GitHubRepo,
-  now: string = new Date().toISOString(),
 ): Promise<{ row: RepositoryRecord; created: boolean }> {
-  const row = await db
-    .prepare(UPSERT_SQL)
-    .bind(repo.id, repo.owner.login, repo.name, repo.full_name, now, now)
-    .first<RepositoryRecord>();
-  if (!row) throw new Error("repositories upsert returned no row");
+  const { data, error } = await db
+    .rpc("register_repository", {
+      p_id: repo.id,
+      p_owner: repo.owner.login,
+      p_name: repo.name,
+      p_full_name: repo.full_name,
+    })
+    .single();
+  if (error) throw new Error(`register_repository failed: ${error.message}`);
+  const row = data as RepositoryRecord;
   return { row, created: row.submission_count === 1 };
 }
 
-export async function getRepository(
-  db: D1Database,
-  id: number,
-): Promise<RepositoryRecord | null> {
-  return db.prepare("SELECT * FROM repositories WHERE id = ?").bind(id).first<RepositoryRecord>();
+export async function getRepository(db: SupabaseClient, id: number): Promise<RepositoryRecord | null> {
+  const { data, error } = await db.from("repositories").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(`select repositories failed: ${error.message}`);
+  return data as RepositoryRecord | null;
 }
