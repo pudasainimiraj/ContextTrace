@@ -1,148 +1,87 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import cloudflareLogo from './assets/cloudflare.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, type FormEvent } from "react";
+import type { ApiError, RepositoryRecord } from "../shared/api.ts";
+import "./App.css";
+
+type Phase =
+  | { kind: "idle" }
+  | { kind: "submitting" }
+  | { kind: "done"; repo: RepositoryRecord; created: boolean }
+  | { kind: "error"; message: string };
 
 function App() {
-  const [count, setCount] = useState(0)
-  const [name, setName] = useState('unknown')
+  const [url, setUrl] = useState("");
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPhase({ kind: "submitting" });
+    try {
+      const res = await fetch("/api/repositories", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const body = (await res.json()) as RepositoryRecord | ApiError;
+      if (!res.ok) {
+        const message = "message" in body ? body.message : `Request failed (${res.status})`;
+        setPhase({ kind: "error", message });
+        return;
+      }
+      setPhase({ kind: "done", repo: body as RepositoryRecord, created: res.status === 201 });
+    } catch (err) {
+      setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started with Cloudflare</h1>
-          <p>
-            Edit <code>src/App.tsx</code> or <code>worker/index.ts</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <ul style={{ display: 'flex', gap: '1rem', listStyle: 'none', padding: 0 }}>
-          <li>
-            <button
-              className="counter"
-              onClick={() => setCount((count) => count + 1)}
-            >
-              Count is {count}
-            </button>
-          </li>
-          <li>
-          <button
-            className="counter"
-            onClick={() => {
-              fetch('/api/')
-                .then((res) => res.json())
-                .then((data) => setName(data.name))
-            }}
-            aria-label='get name'
-          >
-            Name from API is: {name}
-          </button>
-          </li>
-        </ul>
-
-
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-            <li>
-              <a href="https://workers.cloudflare.com/" target="_blank">
-                <img className="button-icon" src={cloudflareLogo} alt="" />
-                Workers Docs
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <main>
+      <h1>ContextTrace</h1>
+      <p>Register a public GitHub repository to trace.</p>
+      <form onSubmit={onSubmit}>
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+          aria-label="GitHub repository URL"
+          required
+        />
+        <button type="submit" disabled={phase.kind === "submitting"}>
+          {phase.kind === "submitting" ? "Checking…" : "Register"}
+        </button>
+      </form>
+      {phase.kind === "error" && (
+        <p role="alert" className="error">
+          {phase.message}
+        </p>
+      )}
+      {phase.kind === "done" && <RepositoryStatus repo={phase.repo} created={phase.created} />}
+    </main>
+  );
 }
 
-export default App
+function RepositoryStatus({ repo, created }: { repo: RepositoryRecord; created: boolean }) {
+  return (
+    <section className="status" aria-live="polite">
+      <p className="badge">
+        {created ? "Registered" : `Already registered (submission #${repo.submission_count})`}
+      </p>
+      <dl>
+        <dt>Repository</dt>
+        <dd>
+          <a href={`https://github.com/${repo.full_name}`} target="_blank" rel="noreferrer">
+            {repo.full_name}
+          </a>
+        </dd>
+        <dt>ID</dt>
+        <dd>{repo.id}</dd>
+        <dt>Status</dt>
+        <dd>{repo.status}</dd>
+        <dt>Registered at</dt>
+        <dd>{repo.created_at}</dd>
+      </dl>
+    </section>
+  );
+}
+
+export default App;
