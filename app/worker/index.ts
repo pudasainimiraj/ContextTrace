@@ -1,7 +1,8 @@
 import type { ApiError } from "../shared/api.ts";
+import { consumeJobMessage } from "./consumer.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
-import { createJob, enqueueJob } from "./jobs.ts";
+import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
@@ -20,7 +21,16 @@ export default {
 
     return error(404, "not_found", "No such route");
   },
-} satisfies ExportedHandler<Env>;
+
+  /** Queue consumer: one lease owner per batch, one claim per message. */
+  async queue(batch, env): Promise<void> {
+    const db = createDb(env);
+    const owner = `consumer:${crypto.randomUUID()}`;
+    for (const message of batch.messages) {
+      await consumeJobMessage(db, message, owner);
+    }
+  },
+} satisfies ExportedHandler<Env, JobMessage>;
 
 /** POST /api/repositories  body: { url } -> 201 new | 200 already registered */
 async function submitRepository(request: Request, env: Env): Promise<Response> {

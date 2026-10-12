@@ -17,7 +17,8 @@
 		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
 	},
 	"queues": {
-		"producers": [{ "binding": "JOBS_QUEUE", "queue": "contexttrace-jobs" }]
+		"producers": [{ "binding": "JOBS_QUEUE", "queue": "contexttrace-jobs" }],
+		"consumers": [{ "queue": "contexttrace-jobs", "max_batch_size": 10, "max_retries": 3 }]
 	},
 	"observability": {
 		"enabled": true
