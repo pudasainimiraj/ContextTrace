@@ -15,3 +15,18 @@ export type ApiError = {
   error: string;
   message: string;
 };
+
+export type JobRecord = {
+  id: number;
+  repository_id: number;
+  kind: string;
+  state: string;
+  generation: number;
+  attempt: number;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};

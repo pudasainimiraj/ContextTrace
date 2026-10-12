@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { JobRecord as Job } from "../shared/api.ts";
+import { createJob as insertJob } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { repoFixture } from "./helpers.ts";
 
@@ -9,24 +11,8 @@ import { repoFixture } from "./helpers.ts";
 const REPO_ID = Date.now() * 100 + 70;
 const db = createDb(env);
 
-type Job = {
-  id: number;
-  repository_id: number;
-  kind: string;
-  state: string;
-  attempt: number;
-  error_code: string | null;
-  error_message: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-};
-
-async function createJob(kind: string): Promise<Job> {
-  const { data, error } = await db.from("jobs").insert({ repository_id: REPO_ID, kind }).select().single();
-  expect(error).toBeNull();
-  return data as Job;
+function createJob(kind: string): Promise<Job> {
+  return insertJob(db, REPO_ID, kind);
 }
 
 function updateJob(id: number, patch: Partial<Job>) {

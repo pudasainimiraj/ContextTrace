@@ -1,6 +1,7 @@
 import type { ApiError } from "../shared/api.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
+import { createJob, enqueueJob } from "./jobs.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
@@ -14,18 +15,17 @@ export default {
     const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
     if (method === "GET" && byId) return getRepositoryById(env, Number(byId[1]));
 
+    const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
+    if (method === "POST" && jobsOf) return createRepositoryJob(request, env, Number(jobsOf[1]));
+
     return error(404, "not_found", "No such route");
   },
 } satisfies ExportedHandler<Env>;
 
 /** POST /api/repositories  body: { url } -> 201 new | 200 already registered */
 async function submitRepository(request: Request, env: Env): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return error(400, "invalid_input", "Request body must be JSON");
-  }
+  const body = await readJson(request);
+  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
   const url = typeof body === "object" && body !== null ? (body as { url?: unknown }).url : undefined;
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
@@ -37,6 +37,22 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
   return created
     ? json(row, { status: 201, headers: { Location: `/api/repositories/${row.id}` } })
     : json(row);
+}
+
+/** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */
+async function createRepositoryJob(request: Request, env: Env, repositoryId: number): Promise<Response> {
+  const body = await readJson(request);
+  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
+  const kind = typeof body === "object" && body !== null ? (body as { kind?: unknown }).kind : undefined;
+  if (typeof kind !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(kind)) {
+    return error(400, "invalid_input", "kind must be a snake_case identifier");
+  }
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  const created = await createJob(db, repositoryId, kind);
+  const job = await enqueueJob(db, env.JOBS_QUEUE, created.id);
+  if (!job) throw new Error(`job ${created.id} could not be enqueued`);
+  return json(job, { status: 202 });
 }
 
 /** GET /api/repositories/:id */
@@ -60,6 +76,15 @@ function lookupError(lookup: Exclude<RepoLookup, { kind: "ok" }>): Response {
       );
     case "upstream_error":
       return error(502, "upstream_error", `GitHub request failed: ${lookup.message}`);
+  }
+}
+
+/** Parsed JSON body, or undefined when the body is not valid JSON. */
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
   }
 }
 

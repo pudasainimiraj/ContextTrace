@@ -16,6 +16,9 @@
 		// Public project URL. The secret key is a secret, not a var (see .env.example).
 		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
 	},
+	"queues": {
+		"producers": [{ "binding": "JOBS_QUEUE", "queue": "contexttrace-jobs" }]
+	},
 	"observability": {
 		"enabled": true
 	},

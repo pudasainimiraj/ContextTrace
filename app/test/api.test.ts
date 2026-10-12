@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RepositoryRecord } from "../shared/api.ts";
+import type { JobRecord, RepositoryRecord } from "../shared/api.ts";
 import { createDb } from "../worker/repositories.ts";
 import { jsonResponse, repoFixture } from "./helpers.ts";
 
@@ -103,6 +103,33 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     expect(await missing.json()).toMatchObject({ error: "not_found" });
 
     expect(fakeGitHub).toHaveBeenCalledTimes(3);
+  });
+
+  it("creates and enqueues a job for a registered repository", async () => {
+    await post("https://github.com/dagster-io/dagster");
+    const jobs = (repositoryId: number, body: unknown) =>
+      exports.default.fetch(`http://localhost/api/repositories/${repositoryId}/jobs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const res = await jobs(ID_DAGSTER, { kind: "fetch_issues" });
+    expect(res.status).toBe(202);
+    expect((await res.json()) as JobRecord).toMatchObject({
+      repository_id: ID_DAGSTER,
+      kind: "fetch_issues",
+      state: "queued",
+      generation: 1,
+    });
+
+    const unknown = await jobs(ID_MISSING, { kind: "fetch_issues" });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: "not_found" });
+
+    const badKind = await jobs(ID_DAGSTER, { kind: "Fetch Issues" });
+    expect(badKind.status).toBe(400);
+    expect(await badKind.json()).toMatchObject({ error: "invalid_input" });
   });
 
   it("registers a renamed repository under its canonical name and stable id", async () => {
