@@ -3,6 +3,7 @@ import { consumeJobMessage } from "./consumer.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
+import { reconcileJobs } from "./reconcile.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
@@ -20,6 +21,12 @@ export default {
     if (method === "POST" && jobsOf) return createRepositoryJob(request, env, Number(jobsOf[1]));
 
     return error(404, "not_found", "No such route");
+  },
+
+  /** Cron: resend messages for jobs whose lease expired or whose retry message was lost. */
+  async scheduled(_controller, env): Promise<void> {
+    const result = await reconcileJobs(createDb(env), env.JOBS_QUEUE);
+    console.log("reconciled jobs", result);
   },
 
   /** Queue consumer: one lease owner per batch, one claim per message. */

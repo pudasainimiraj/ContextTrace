@@ -16,6 +16,10 @@
 		// Public project URL. The secret key is a secret, not a var (see .env.example).
 		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
 	},
+	"triggers": {
+		// Reconciliation sweep: resend messages for expired leases and lost retries.
+		"crons": ["*/5 * * * *"]
+	},
 	"queues": {
 		"producers": [{ "binding": "JOBS_QUEUE", "queue": "contexttrace-jobs" }],
 		"consumers": [{ "queue": "contexttrace-jobs", "max_batch_size": 10, "max_retries": 3 }]
