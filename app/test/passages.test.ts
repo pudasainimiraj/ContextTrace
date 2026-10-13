@@ -4,6 +4,7 @@ import { MAX_PASSAGE_TOKENS } from "../worker/chunk.ts";
 import {
   buildPassages,
   compareUnits,
+  contentHash,
   documentFromSources,
   documentId,
   type PassageDraft,
@@ -299,5 +300,28 @@ describe("long comments with the model tokenizer", () => {
       }
     }
     expect(parts.filter((p) => p.text.includes(url))).toHaveLength(1);
+  });
+});
+
+describe("stable ids and content hashes", () => {
+  it("passage ids are deterministic and distinct across comment types", () => {
+    const rows: SourceRecord[] = [
+      source({ type: "issue", github_id: 1, number: 1, created_at: "2026-01-01T00:00:00Z", title: "t", body: "opening" }),
+      source({ type: "issue_comment", github_id: 7, number: 1, created_at: "2026-01-02T00:00:00Z", body: "conversation" }),
+      source({ type: "review_comment", github_id: 7, number: 1, created_at: "2026-01-03T00:00:00Z", body: "inline", path: "a.ts", line: 1 }),
+    ];
+    const build = () => buildPassages(documentFromSources(424242, rows)!, { maxTokens: 512, countTokens: words, tokenizer: "words" });
+    const ids = build().passages.map((p) => p.passage_id);
+    expect(ids).toEqual([
+      "github:424242:issue:1:body:0",
+      "github:424242:issue:1:issue_comment:7:0",
+      "github:424242:issue:1:review_comment:7:0",
+    ]);
+    expect(build().passages.map((p) => p.passage_id)).toEqual(ids);
+  });
+
+  it("content hash is the SHA-256 hex of the text", async () => {
+    expect(await contentHash("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    expect(await contentHash("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   });
 });

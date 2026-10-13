@@ -93,7 +93,9 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
     const second = await runJobOfKind("fetch_issues", github, first.queue, continuation.jobId);
     expect(second.job).toMatchObject({ state: "succeeded", result: { pages: 2, records: 6 } });
     expect(github.requests.at(-2)?.searchParams.get("page")).toBe("6");
-    expect(first.queue.send).toHaveBeenCalledTimes(2); // no further continuation
+    // No further continuation; the finished listing queues the transform instead.
+    expect(first.queue.send).toHaveBeenCalledTimes(3);
+    expect(first.queue.send.mock.calls[2][0]).toMatchObject({ repoId: REPO_ID, kind: "transform_passages" });
 
     const done = await getCheckpoint(db, REPO_ID, "issues");
     expect(done?.cursor).toBeNull();

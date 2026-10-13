@@ -165,3 +165,18 @@ export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildR
   }
   return { passages, units: units.length, skipped };
 }
+
+export type PassageRow = Omit<PassageRecord, "updated_at">;
+
+/** SHA-256 of the UTF-8 bytes of `text`, lowercase hex. */
+export async function contentHash(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Adds the content hash and the transform version that make a draft a storable row. */
+export function finalizePassages(drafts: PassageDraft[], transformVersion: string): Promise<PassageRow[]> {
+  return Promise.all(
+    drafts.map(async (draft) => ({ ...draft, content_hash: await contentHash(draft.text), transform_version: transformVersion })),
+  );
+}
