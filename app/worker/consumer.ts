@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
+import { EMBED_JOB_KIND, embedPassages } from "./embed.ts";
+import type { EmbeddingClient } from "./embeddings.ts";
 import { extractStream, STREAMS } from "./extract.ts";
 import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
 import { nextJobKind } from "./pipeline.ts";
@@ -7,7 +9,12 @@ import { getRepository } from "./repositories.ts";
 import { backoffSeconds, classifyError, JobError, MAX_ATTEMPTS } from "./retry.ts";
 import { TRANSFORM_JOB_KIND, transformRepository } from "./transform.ts";
 
-export type JobContext = { db: SupabaseClient; token?: string; fetch?: typeof globalThis.fetch };
+export type JobContext = {
+  db: SupabaseClient;
+  token?: string;
+  fetch?: typeof globalThis.fetch;
+  embeddings?: EmbeddingClient;
+};
 
 /** What one run achieved; `done: false` asks for a continuation job of the same kind. */
 export type RunResult = { done: boolean; result?: Record<string, unknown> };
@@ -19,6 +26,10 @@ export type ConsumerContext = JobContext & { queue: JobQueue; run?: JobRunner };
 const RUNNERS: Record<string, JobRunner> = {
   [TRANSFORM_JOB_KIND]: async (job, ctx) => {
     const { done, ...result } = await transformRepository(ctx.db, job.repository_id);
+    return { done, result };
+  },
+  [EMBED_JOB_KIND]: async (job, ctx) => {
+    const { done, ...result } = await embedPassages(ctx, job.repository_id, job.id);
     return { done, result };
   },
 };

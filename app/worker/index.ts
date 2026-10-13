@@ -4,6 +4,8 @@ import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
 import { listPassages } from "./documents.ts";
+import { embeddingStats } from "./embed.ts";
+import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
 import { listSources } from "./sources.ts";
@@ -29,6 +31,9 @@ export default {
     const passagesOf = /^\/api\/repositories\/(\d+)\/passages$/.exec(pathname);
     if (method === "GET" && passagesOf) return listRepositoryPassages(env, Number(passagesOf[1]), new URL(request.url));
 
+    const statsOf = /^\/api\/repositories\/(\d+)\/embeddings\/stats$/.exec(pathname);
+    if (method === "GET" && statsOf) return getEmbeddingStats(env, Number(statsOf[1]));
+
     return error(404, "not_found", "No such route");
   },
 
@@ -40,7 +45,12 @@ export default {
 
   /** Queue consumer: one lease owner per batch, one claim per message. */
   async queue(batch, env): Promise<void> {
-    const ctx = { db: createDb(env), queue: env.JOBS_QUEUE, token: env.GITHUB_TOKEN || undefined };
+    const ctx = {
+      db: createDb(env),
+      queue: env.JOBS_QUEUE,
+      token: env.GITHUB_TOKEN || undefined,
+      embeddings: createEmbeddingClient(env),
+    };
     const owner = `consumer:${crypto.randomUUID()}`;
     for (const message of batch.messages) {
       await consumeJobMessage(ctx, message, owner);
@@ -121,6 +131,13 @@ async function listRepositoryPassages(env: Env, repositoryId: number, url: URL):
     limit: limit === null ? undefined : Number(limit),
   });
   return json(passages);
+}
+
+/** GET /api/repositories/:id/embeddings/stats -> coverage and metering for the repository */
+async function getEmbeddingStats(env: Env, repositoryId: number): Promise<Response> {
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  return json(await embeddingStats(db, repositoryId));
 }
 
 /** GET /api/repositories/:id */

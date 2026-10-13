@@ -95,3 +95,21 @@ export type PassageRecord = {
   transform_version: string;
   updated_at: string;
 };
+
+/** Embedding coverage and metering for one repository. */
+export type EmbeddingStats = {
+  repository_id: number;
+  model: string;
+  pooling: string;
+  dims: number;
+  passages: number;
+  embedded: number; // passages whose stored vector matches their current content hash
+  pending: number; // embeddable passages without a current vector
+  oversized: number; // token_count above the model limit; never sent
+  empty: number; // blank text; never sent
+  texts: number; // texts sent to the model, all runs
+  tokens: number; // sum of the texts' model input lengths
+  billed_tokens: number; // as metered by Workers AI
+  neurons_estimated: number;
+  usd_estimated: number;
+};
