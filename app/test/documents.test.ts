@@ -40,6 +40,7 @@ function passage(index: number): Omit<PassageRecord, "updated_at"> {
     text_kind: "normalized_markdown",
     content_hash: HASH,
     transform_version: "test",
+    index_state: "pending_index",
   };
 }
 

@@ -119,7 +119,7 @@ export function reviewPositions(comments: UnitInput[]): Map<number, number> {
 }
 
 export type BuildOptions = { maxTokens: number; countTokens: TokenCounter; tokenizer: string };
-export type PassageDraft = Omit<PassageRecord, "content_hash" | "transform_version" | "updated_at">;
+export type PassageDraft = Omit<PassageRecord, "content_hash" | "transform_version" | "index_state" | "updated_at">;
 export type BuildResult = { passages: PassageDraft[]; units: number; skipped: number };
 
 /**
@@ -166,7 +166,8 @@ export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildR
   return { passages, units: units.length, skipped };
 }
 
-export type PassageRow = Omit<PassageRecord, "updated_at">;
+/** A storable row; the database owns index_state and updated_at. */
+export type PassageRow = Omit<PassageRecord, "index_state" | "updated_at">;
 
 /** SHA-256 of the UTF-8 bytes of `text`, lowercase hex. */
 export async function contentHash(text: string): Promise<string> {

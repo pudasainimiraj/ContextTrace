@@ -93,6 +93,7 @@ export type PassageRecord = {
   text_kind: "normalized_markdown";
   content_hash: string; // sha256 hex of text
   transform_version: string;
+  index_state: "pending_index" | "active"; // active once the vector for this text is stored
   updated_at: string;
 };
 
