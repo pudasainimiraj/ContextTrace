@@ -29,7 +29,7 @@
 	},
 	"upload_source_maps": true
 	/**
-	 * Secrets (SUPABASE_SECRET_KEY, GITHUB_TOKEN) are not declared here.
+	 * Secrets (SUPABASE_SECRET_KEY, GITHUB_TOKEN, WORKERS_AI_API_TOKEN) and the account id are not declared here.
 	 * Local: app/.env (see .env.example). Remote: `npx wrangler secret put <NAME>`.
 	 */
 }
