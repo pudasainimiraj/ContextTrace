@@ -1,4 +1,6 @@
-import type { DocumentType, SourceRecord, SourceType } from "../shared/api.ts";
+import type { DocumentType, PassageRecord, SourceRecord, SourceType } from "../shared/api.ts";
+import { splitText, type TokenCounter } from "./chunk.ts";
+import { normalizeMarkdown, TEXT_KIND } from "./normalize.ts";
 
 /** One source unit as the passage builder consumes it: the opening body or one comment. */
 export type UnitInput = {
@@ -114,4 +116,52 @@ export function reviewPositions(comments: UnitInput[]): Map<number, number> {
     if (unit.source_type === "review_comment") position.set(unit.source_github_id, i + 1);
   });
   return position;
+}
+
+export type BuildOptions = { maxTokens: number; countTokens: TokenCounter; tokenizer: string };
+export type PassageDraft = Omit<PassageRecord, "content_hash" | "transform_version" | "updated_at">;
+export type BuildResult = { passages: PassageDraft[]; units: number; skipped: number };
+
+/**
+ * Port of build_passages(): every unit (the opening body, then each comment in thread
+ * order) is normalized, split within the token budget, and labelled. A unit whose
+ * normalized text is empty is skipped and counted. A passage never mixes units.
+ */
+export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildResult {
+  const position = reviewPositions(doc.comments);
+  const units = [
+    { unit: doc.opening, locator: "Opening body" },
+    ...doc.comments.map((unit, i) => ({ unit, locator: unitLocator(unit, i + 1, doc.comments.length, position) })),
+  ];
+
+  const passages: PassageDraft[] = [];
+  let skipped = 0;
+  for (const { unit, locator } of units) {
+    const text = normalizeMarkdown(unit.body);
+    if (!text) {
+      skipped += 1;
+      continue;
+    }
+    const chunks = splitText(text, options.maxTokens, options.countTokens);
+    chunks.forEach((chunk, index) => {
+      passages.push({
+        passage_id: passageId(doc.document_id, unit, index),
+        document_id: doc.document_id,
+        repository_id: doc.repository_id,
+        source_type: unit.source_type,
+        source_github_id: unit.source_github_id,
+        chunk_index: index,
+        chunk_count: chunks.length,
+        token_count: options.countTokens(chunk),
+        tokenizer: options.tokenizer,
+        locator: chunks.length > 1 ? `${locator} (part ${index + 1} of ${chunks.length})` : locator,
+        author: unit.author,
+        created_at: unit.created_at,
+        source_url: unit.source_url,
+        text: chunk,
+        text_kind: TEXT_KIND,
+      });
+    });
+  }
+  return { passages, units: units.length, skipped };
 }
