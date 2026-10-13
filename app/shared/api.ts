@@ -97,6 +97,22 @@ export type PassageRecord = {
   updated_at: string;
 };
 
+/** One search hit: a passage of the requested repository and its cosine similarity to the query. */
+export type SearchHit = {
+  passage_id: string;
+  document_id: string;
+  score: number; // 1 = identical text
+};
+
+/** POST /api/search response. The query is embedded on the server; no vector leaves it. */
+export type SearchResponse = {
+  repository_id: number;
+  query: string; // as searched, trimmed
+  limit: number;
+  embed_ms: number; // wall time of the query embedding call
+  results: SearchHit[];
+};
+
 /** Embedding coverage and metering for one repository. */
 export type EmbeddingStats = {
   repository_id: number;
