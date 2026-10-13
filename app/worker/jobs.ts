@@ -84,7 +84,7 @@ export async function claimJob(
 }
 
 export type JobResult =
-  | { state: "succeeded" }
+  | { state: "succeeded"; result?: Record<string, unknown> }
   | { state: "failed"; error_code: string; error_message: string }
   | { state: "retry_pending"; error_code: string; error_message: string; next_attempt_at: string };
 

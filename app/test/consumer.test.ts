@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { JobRecord } from "../shared/api.ts";
+import { consumeJobMessage } from "../worker/consumer.ts";
 import worker from "../worker/index.ts";
 import { createJob, enqueueJob, getJob, type JobMessage } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
@@ -11,8 +12,16 @@ const REPO_ID = Date.now() * 100 + 60;
 const db = createDb(env);
 const silentQueue = { send: async () => {} };
 
-/** Delivers the messages to the Worker's queue handler the way the runtime would. */
+/** Delivers the messages to the consumer with a no-op runner, one lease owner per batch. */
 async function deliver(messages: FakeMessage[]): Promise<void> {
+  const owner = `consumer:${crypto.randomUUID()}`;
+  for (const message of messages) {
+    await consumeJobMessage({ db, queue: silentQueue, run: async () => ({ done: true }) }, message, owner);
+  }
+}
+
+/** Delivers the messages to the Worker's queue handler the way the runtime would. */
+async function deliverToHandler(messages: FakeMessage[]): Promise<void> {
   const batch = { queue: "contexttrace-jobs", messages, ackAll: vi.fn(), retryAll: vi.fn() };
   await worker.queue(batch as unknown as MessageBatch<JobMessage>, env);
 }
@@ -73,9 +82,9 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("queue consumer", () => {
     expect((await transitionsOf(job.id)).data).toHaveLength(3);
   });
 
-  it("acks a malformed message", async () => {
+  it("acks a malformed message delivered to the Worker's queue handler", async () => {
     const message = fakeMessage({ hello: "world" });
-    await deliver([message]);
+    await deliverToHandler([message]);
     expect(message.ack).toHaveBeenCalledTimes(1);
   });
 });

@@ -57,7 +57,7 @@ const transientFailure = async () => {
 const permanentFailure = async () => {
   throw new Error("schema mismatch");
 };
-const success = async () => {};
+const success = async () => ({ done: true });
 
 beforeAll(async () => {
   await upsertRepository(db, repoFixture({ id: REPO_ID, full_name: "alice/retries" }));
@@ -73,7 +73,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("consumer retries", () => {
     queue.send.mockClear();
 
     const first = fakeMessage(messageFor(job));
-    await consumeJobMessage(db, first, "worker-a", queue, transientFailure);
+    await consumeJobMessage({ db, queue, run: transientFailure }, first, "worker-a");
     expect(first.ack).toHaveBeenCalledTimes(1);
 
     const parked = await getJob(db, job.id);
@@ -93,7 +93,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("consumer retries", () => {
 
     // The delayed message arrives before the backoff has passed: redeliver later, do nothing.
     const early = fakeMessage(messageFor(job, 2));
-    await consumeJobMessage(db, early, "worker-b", queue, success);
+    await consumeJobMessage({ db, queue, run: success }, early, "worker-b");
     expect(early.ack).not.toHaveBeenCalled();
     expect(early.retry).toHaveBeenCalledTimes(1);
     const delay = early.retry.mock.calls[0][0]?.delaySeconds ?? 0;
@@ -104,7 +104,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("consumer retries", () => {
     // Once the backoff has passed the retry runs as attempt 2 and starts clean.
     await db.from("jobs").update({ next_attempt_at: new Date(Date.now() - 1000).toISOString() }).eq("id", job.id);
     const due = fakeMessage(messageFor(job, 2));
-    await consumeJobMessage(db, due, "worker-b", queue, success);
+    await consumeJobMessage({ db, queue, run: success }, due, "worker-b");
     expect(due.ack).toHaveBeenCalledTimes(1);
     expect(await getJob(db, job.id)).toMatchObject({
       state: "succeeded",
@@ -129,7 +129,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("consumer retries", () => {
     queue.send.mockClear();
 
     const message = fakeMessage(messageFor(job));
-    await consumeJobMessage(db, message, "worker-a", queue, permanentFailure);
+    await consumeJobMessage({ db, queue, run: permanentFailure }, message, "worker-a");
 
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(await getJob(db, job.id)).toMatchObject({ state: "failed", attempt: 1, error_code: "unhandled" });
@@ -143,7 +143,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("consumer retries", () => {
     await db.from("jobs").update({ attempt: MAX_ATTEMPTS - 1 }).eq("id", job.id);
 
     const message = fakeMessage(messageFor(job));
-    await consumeJobMessage(db, message, "worker-a", queue, transientFailure);
+    await consumeJobMessage({ db, queue, run: transientFailure }, message, "worker-a");
 
     expect(message.ack).toHaveBeenCalledTimes(1);
     expect(await getJob(db, job.id)).toMatchObject({ state: "failed", attempt: MAX_ATTEMPTS, error_code: "rate_limited" });

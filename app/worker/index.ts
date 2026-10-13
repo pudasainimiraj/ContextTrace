@@ -31,10 +31,10 @@ export default {
 
   /** Queue consumer: one lease owner per batch, one claim per message. */
   async queue(batch, env): Promise<void> {
-    const db = createDb(env);
+    const ctx = { db: createDb(env), queue: env.JOBS_QUEUE, token: env.GITHUB_TOKEN || undefined };
     const owner = `consumer:${crypto.randomUUID()}`;
     for (const message of batch.messages) {
-      await consumeJobMessage(db, message, owner, env.JOBS_QUEUE);
+      await consumeJobMessage(ctx, message, owner);
     }
   },
 } satisfies ExportedHandler<Env, JobMessage>;
