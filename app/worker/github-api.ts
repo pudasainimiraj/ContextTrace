@@ -69,7 +69,7 @@ export async function lookupPublicRepository(
   return { kind: "ok", repo: body };
 }
 
-function rateLimitWait(res: Response, message: string): number | null {
+export function rateLimitWait(res: Response, message: string): number | null {
   const retryAfter = res.headers.get("Retry-After");
   if (retryAfter && /^\d+$/.test(retryAfter)) return Number(retryAfter);
   if (res.headers.get("X-RateLimit-Remaining") === "0") {
@@ -91,7 +91,7 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-function messageOf(body: unknown): string {
+export function messageOf(body: unknown): string {
   if (typeof body === "object" && body !== null && "message" in body) {
     const m = (body as { message: unknown }).message;
     if (typeof m === "string") return m;

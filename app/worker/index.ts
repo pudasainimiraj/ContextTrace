@@ -1,7 +1,12 @@
-import type { ApiError } from "../shared/api.ts";
+import type { ApiError, SourceType } from "../shared/api.ts";
+import { consumeJobMessage } from "./consumer.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
-import { getRepository, upsertRepository } from "./repositories.ts";
+import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
+import { startExtraction } from "./pipeline.ts";
+import { reconcileJobs } from "./reconcile.ts";
+import { listSources } from "./sources.ts";
+import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -14,18 +19,35 @@ export default {
     const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
     if (method === "GET" && byId) return getRepositoryById(env, Number(byId[1]));
 
+    const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
+    if (method === "POST" && jobsOf) return createRepositoryJob(request, env, Number(jobsOf[1]));
+
+    const sourcesOf = /^\/api\/repositories\/(\d+)\/sources$/.exec(pathname);
+    if (method === "GET" && sourcesOf) return listRepositorySources(env, Number(sourcesOf[1]), new URL(request.url));
+
     return error(404, "not_found", "No such route");
   },
-} satisfies ExportedHandler<Env>;
+
+  /** Cron: resend messages for jobs whose lease expired or whose retry message was lost. */
+  async scheduled(_controller, env): Promise<void> {
+    const result = await reconcileJobs(createDb(env), env.JOBS_QUEUE);
+    console.log("reconciled jobs", result);
+  },
+
+  /** Queue consumer: one lease owner per batch, one claim per message. */
+  async queue(batch, env): Promise<void> {
+    const ctx = { db: createDb(env), queue: env.JOBS_QUEUE, token: env.GITHUB_TOKEN || undefined };
+    const owner = `consumer:${crypto.randomUUID()}`;
+    for (const message of batch.messages) {
+      await consumeJobMessage(ctx, message, owner);
+    }
+  },
+} satisfies ExportedHandler<Env, JobMessage>;
 
 /** POST /api/repositories  body: { url } -> 201 new | 200 already registered */
 async function submitRepository(request: Request, env: Env): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return error(400, "invalid_input", "Request body must be JSON");
-  }
+  const body = await readJson(request);
+  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
   const url = typeof body === "object" && body !== null ? (body as { url?: unknown }).url : undefined;
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
@@ -33,15 +55,57 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
   const lookup = await lookupPublicRepository(parsed, { token: env.GITHUB_TOKEN || undefined });
   if (lookup.kind !== "ok") return lookupError(lookup);
 
-  const { row, created } = await upsertRepository(env.DB, lookup.repo);
+  const db = createDb(env);
+  const { row, created } = await upsertRepository(db, lookup.repo);
+  // A newly registered repository starts its extraction streams at once.
+  if (created) await startExtraction(db, env.JOBS_QUEUE, row.id);
   return created
     ? json(row, { status: 201, headers: { Location: `/api/repositories/${row.id}` } })
     : json(row);
 }
 
+const SOURCE_TYPES: SourceType[] = ["issue", "pull_request", "issue_comment", "review_comment"];
+
+/** GET /api/repositories/:id/sources?type=&number=&limit=  -> stored records with provenance */
+async function listRepositorySources(env: Env, repositoryId: number, url: URL): Promise<Response> {
+  const type = url.searchParams.get("type");
+  if (type !== null && !SOURCE_TYPES.includes(type as SourceType)) {
+    return error(400, "invalid_input", `type must be one of ${SOURCE_TYPES.join(", ")}`);
+  }
+  const number = url.searchParams.get("number");
+  if (number !== null && !/^\d+$/.test(number)) return error(400, "invalid_input", "number must be an integer");
+  const limit = url.searchParams.get("limit");
+  if (limit !== null && !/^\d+$/.test(limit)) return error(400, "invalid_input", "limit must be an integer");
+
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  const sources = await listSources(db, repositoryId, {
+    type: (type as SourceType | null) ?? undefined,
+    number: number === null ? undefined : Number(number),
+    limit: limit === null ? undefined : Number(limit),
+  });
+  return json(sources);
+}
+
+/** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */
+async function createRepositoryJob(request: Request, env: Env, repositoryId: number): Promise<Response> {
+  const body = await readJson(request);
+  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
+  const kind = typeof body === "object" && body !== null ? (body as { kind?: unknown }).kind : undefined;
+  if (typeof kind !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(kind)) {
+    return error(400, "invalid_input", "kind must be a snake_case identifier");
+  }
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  const created = await createJob(db, repositoryId, kind);
+  const job = await enqueueJob(db, env.JOBS_QUEUE, created.id);
+  if (!job) throw new Error(`job ${created.id} could not be enqueued`);
+  return json(job, { status: 202 });
+}
+
 /** GET /api/repositories/:id */
 async function getRepositoryById(env: Env, id: number): Promise<Response> {
-  const row = await getRepository(env.DB, id);
+  const row = await getRepository(createDb(env), id);
   return row ? json(row) : error(404, "not_found", "Repository is not registered");
 }
 
@@ -60,6 +124,15 @@ function lookupError(lookup: Exclude<RepoLookup, { kind: "ok" }>): Response {
       );
     case "upstream_error":
       return error(502, "upstream_error", `GitHub request failed: ${lookup.message}`);
+  }
+}
+
+/** Parsed JSON body, or undefined when the body is not valid JSON. */
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
   }
 }
 
