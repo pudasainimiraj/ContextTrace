@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { ApiError, RepositoryRecord } from "../shared/api.ts";
+import type { ApiError, EvidenceCard, RepositoryRecord, SearchResponse } from "../shared/api.ts";
 import "./App.css";
 
 type Phase =
@@ -55,7 +55,12 @@ function App() {
           {phase.message}
         </p>
       )}
-      {phase.kind === "done" && <RepositoryStatus repo={phase.repo} created={phase.created} />}
+      {phase.kind === "done" && (
+        <>
+          <RepositoryStatus repo={phase.repo} created={phase.created} />
+          <SearchPanel repositoryId={phase.repo.id} />
+        </>
+      )}
     </main>
   );
 }
@@ -81,6 +86,104 @@ function RepositoryStatus({ repo, created }: { repo: RepositoryRecord; created: 
         <dd>{repo.created_at}</dd>
       </dl>
     </section>
+  );
+}
+
+type SearchPhase =
+  | { kind: "idle" }
+  | { kind: "searching" }
+  | { kind: "done"; response: SearchResponse }
+  | { kind: "error"; message: string };
+
+/** Asks the server for evidence; the query is embedded there, so nothing is downloaded here. */
+function SearchPanel({ repositoryId }: { repositoryId: number }) {
+  const [query, setQuery] = useState("");
+  const [phase, setPhase] = useState<SearchPhase>({ kind: "idle" });
+
+  async function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPhase({ kind: "searching" });
+    try {
+      const res = await fetch("/api/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repositoryId, query }),
+      });
+      const body = (await res.json()) as SearchResponse | ApiError;
+      if (!res.ok) {
+        const message = "error" in body ? body.message : `Request failed (${res.status})`;
+        setPhase({ kind: "error", message });
+        return;
+      }
+      setPhase({ kind: "done", response: body as SearchResponse });
+    } catch (err) {
+      setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return (
+    <section className="search" aria-label="Search">
+      <h2>Search the discussions</h2>
+      <form onSubmit={onSearch}>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="How do I limit concurrency?"
+          aria-label="Search query"
+          maxLength={500}
+          required
+        />
+        <button type="submit" disabled={phase.kind === "searching"}>
+          {phase.kind === "searching" ? "Searching…" : "Search"}
+        </button>
+      </form>
+      {phase.kind === "error" && (
+        <p role="alert" className="error">
+          {phase.message}
+        </p>
+      )}
+      {phase.kind === "done" && <SearchResults response={phase.response} />}
+    </section>
+  );
+}
+
+function SearchResults({ response }: { response: SearchResponse }) {
+  const total = response.index.embedded + response.index.pending;
+  return (
+    <div aria-live="polite">
+      {response.message && (
+        <p role="status" className={`notice ${response.confidence}`}>
+          {response.message}
+        </p>
+      )}
+      <p className="meta">
+        {response.results.length} result{response.results.length === 1 ? "" : "s"} · {response.mode} search · {response.index.embedded} of{" "}
+        {total} passages embedded
+        {response.unverified > 0 ? ` · ${response.unverified} left out without a verified link` : ""}
+      </p>
+      <ol className="results">
+        {response.results.map((card) => (
+          <EvidenceCardView key={card.passage_id} card={card} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function EvidenceCardView({ card }: { card: EvidenceCard }) {
+  const kind = card.type === "issue" ? "Issue" : "Pull request";
+  return (
+    <li className="card">
+      <a href={card.source_url} target="_blank" rel="noreferrer">
+        {card.title}
+      </a>
+      <p className="meta">
+        {kind} #{card.number} · {card.locator}
+        {card.author ? ` · ${card.author}` : ""} · {card.created_at.slice(0, 10)} · {card.match} match {card.score.toFixed(2)}
+      </p>
+      <p className="excerpt">{card.excerpt}</p>
+    </li>
   );
 }
 

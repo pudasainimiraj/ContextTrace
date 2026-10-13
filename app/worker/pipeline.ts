@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
 import { STREAMS } from "./extract.ts";
+import { EMBED_JOB_KIND } from "./embed.ts";
 import { createJob, enqueueJob, type JobQueue } from "./jobs.ts";
 import { TRANSFORM_JOB_KIND } from "./transform.ts";
 
@@ -15,8 +16,11 @@ export async function startExtraction(db: SupabaseClient, queue: JobQueue, repos
   return jobs;
 }
 
-/** The job that follows a finished job of `kind`: every extraction stream feeds the transform. */
-const NEXT_JOB_KIND: Record<string, string> = Object.fromEntries(Object.keys(STREAMS).map((kind) => [kind, TRANSFORM_JOB_KIND]));
+/** The job that follows a finished job of `kind`: streams feed the transform, which feeds the embedding. */
+const NEXT_JOB_KIND: Record<string, string> = {
+  ...Object.fromEntries(Object.keys(STREAMS).map((kind) => [kind, TRANSFORM_JOB_KIND])),
+  [TRANSFORM_JOB_KIND]: EMBED_JOB_KIND,
+};
 
 export function nextJobKind(kind: string): string | undefined {
   return NEXT_JOB_KIND[kind];

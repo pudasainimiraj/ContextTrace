@@ -4,8 +4,11 @@ import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
 import { listPassages } from "./documents.ts";
+import { embeddingStats } from "./embed.ts";
+import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
+import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
 import { listSources } from "./sources.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
@@ -16,6 +19,7 @@ export default {
 
     if (method === "GET" && pathname === "/api/health") return json({ ok: true });
     if (method === "POST" && pathname === "/api/repositories") return submitRepository(request, env);
+    if (method === "POST" && pathname === "/api/search") return searchRepository(request, env);
 
     const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
     if (method === "GET" && byId) return getRepositoryById(env, Number(byId[1]));
@@ -29,6 +33,9 @@ export default {
     const passagesOf = /^\/api\/repositories\/(\d+)\/passages$/.exec(pathname);
     if (method === "GET" && passagesOf) return listRepositoryPassages(env, Number(passagesOf[1]), new URL(request.url));
 
+    const statsOf = /^\/api\/repositories\/(\d+)\/embeddings\/stats$/.exec(pathname);
+    if (method === "GET" && statsOf) return getEmbeddingStats(env, Number(statsOf[1]));
+
     return error(404, "not_found", "No such route");
   },
 
@@ -40,7 +47,12 @@ export default {
 
   /** Queue consumer: one lease owner per batch, one claim per message. */
   async queue(batch, env): Promise<void> {
-    const ctx = { db: createDb(env), queue: env.JOBS_QUEUE, token: env.GITHUB_TOKEN || undefined };
+    const ctx = {
+      db: createDb(env),
+      queue: env.JOBS_QUEUE,
+      token: env.GITHUB_TOKEN || undefined,
+      embeddings: createEmbeddingClient(env),
+    };
     const owner = `consumer:${crypto.randomUUID()}`;
     for (const message of batch.messages) {
       await consumeJobMessage(ctx, message, owner);
@@ -121,6 +133,36 @@ async function listRepositoryPassages(env: Env, repositoryId: number, url: URL):
     limit: limit === null ? undefined : Number(limit),
   });
   return json(passages);
+}
+
+/** GET /api/repositories/:id/embeddings/stats -> coverage and metering for the repository */
+async function getEmbeddingStats(env: Env, repositoryId: number): Promise<Response> {
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  return json(await embeddingStats(db, repositoryId));
+}
+
+/** POST /api/search  body: { repositoryId, query, limit? } -> evidence cards, query embedded on the server */
+async function searchRepository(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return error(400, "invalid_input", "Request body must be a JSON object");
+  }
+  const { repositoryId, query, limit } = body as { repositoryId?: unknown; query?: unknown; limit?: unknown };
+  if (!isPositiveInt(repositoryId)) return error(400, "invalid_input", "repositoryId must be a positive integer");
+  if (typeof query !== "string" || query.trim() === "") return error(400, "invalid_input", "query must be a non-empty string");
+  if (query.length > MAX_QUERY_CHARS) return error(400, "invalid_input", `query must be at most ${MAX_QUERY_CHARS} characters`);
+  if (limit !== undefined && (!isPositiveInt(limit) || limit > SEARCH_LIMIT_MAX)) {
+    return error(400, "invalid_input", `limit must be an integer from 1 to ${SEARCH_LIMIT_MAX}`);
+  }
+
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  return json(await search({ db, embeddings: createEmbeddingClient(env) }, { repositoryId, query, limit }));
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 /** GET /api/repositories/:id */

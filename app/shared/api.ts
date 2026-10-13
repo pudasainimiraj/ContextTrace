@@ -93,5 +93,67 @@ export type PassageRecord = {
   text_kind: "normalized_markdown";
   content_hash: string; // sha256 hex of text
   transform_version: string;
+  index_state: "pending_index" | "active"; // active once the vector for this text is stored
   updated_at: string;
+};
+
+/** One search hit: a passage of the requested repository and its cosine similarity to the query. */
+export type SearchHit = {
+  passage_id: string;
+  document_id: string;
+  score: number; // 1 = identical text
+};
+
+/** One search result, resolved from its passage and thread: enough to read and to verify at the source. */
+export type EvidenceCard = {
+  passage_id: string;
+  document_id: string;
+  type: DocumentType;
+  number: number; // issue or pull request number
+  title: string; // thread title
+  source_type: SourceType;
+  locator: string; // where in the thread, e.g. "Comment 2 of 5"
+  author: string | null;
+  created_at: string; // GitHub time of the source unit
+  source_url: string; // verified github.com permalink to the thread, anchored to the comment
+  excerpt: string; // start of the passage on one line, cut at a word boundary
+  score: number; // cosine similarity for a semantic match, ts_rank_cd for a keyword match
+  match: EvidenceMatch;
+};
+
+export type EvidenceMatch = "semantic" | "keyword";
+export type SearchMode = "semantic" | "keyword" | "none";
+export type SearchConfidence = "high" | "low" | "none";
+
+/** POST /api/search response. The query is embedded on the server; no vector leaves it. */
+export type SearchResponse = {
+  repository_id: number;
+  query: string; // as searched, trimmed
+  limit: number;
+  mode: SearchMode; // where the results come from
+  confidence: SearchConfidence; // high: close semantic matches; low: weak or keyword-only; none: nothing shown
+  message: string | null; // what the reader should know when confidence is not high
+  semantic_error: string | null; // error code when the semantic search could not run
+  embed_ms: number | null; // wall time of the query embedding call
+  index: { embedded: number; pending: number }; // passages with a current vector, and waiting for one
+  results: EvidenceCard[];
+  unverified: number; // hits left out because their source link could not be verified
+};
+
+/** Embedding coverage and metering for one repository. */
+export type EmbeddingStats = {
+  repository_id: number;
+  model: string;
+  pooling: string;
+  dims: number;
+  passages: number;
+  embedded: number; // passages whose stored vector matches their current content hash
+  pending: number; // embeddable passages without a current vector
+  oversized: number; // token_count above the model limit; never sent
+  empty: number; // blank text; never sent
+  texts: number; // texts sent to the model, all runs
+  tokens: number; // sum of the texts' model input lengths
+  billed_tokens: number; // as metered by Workers AI
+  neurons_estimated: number;
+  usd_estimated: number;
 };
