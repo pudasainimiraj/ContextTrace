@@ -6,7 +6,7 @@ import { type GitHubIssue, MAX_PAGES_PER_RUN, toGitHubTimestamp } from "../worke
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
-import { fakeMessage, jsonResponse, repoFixture } from "./helpers.ts";
+import { type FakeGitHub, fakeGitHubPages, fakeMessage, jsonResponse, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project with GitHub stubbed; see jobs.test.ts for the
 // id scheme. The stubbed repository is alice/extract.
@@ -37,27 +37,7 @@ function issue(n: number, opts: { pr?: boolean; title?: string; updated_at?: str
   };
 }
 
-type FakeGitHub = { fetch: typeof globalThis.fetch; requests: URL[] };
-
-/** Serves `pages` in order with Link headers; `respond` can override any request. */
-function fakeGitHub(pages: GitHubIssue[][], respond?: (url: URL) => Response | undefined): FakeGitHub {
-  const requests: URL[] = [];
-  const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    requests.push(url);
-    const override = respond?.(url);
-    if (override) return override;
-    const page = Number(url.searchParams.get("page") ?? "1");
-    const headers: Record<string, string> = { "X-RateLimit-Remaining": "4999" };
-    if (page < pages.length) {
-      const next = new URL(url);
-      next.searchParams.set("page", String(page + 1));
-      headers.Link = `<${next}>; rel="next"`;
-    }
-    return jsonResponse(200, pages[page - 1] ?? [], headers);
-  });
-  return { fetch, requests };
-}
+const fakeGitHub = fakeGitHubPages;
 
 function fakeQueue() {
   return { send: vi.fn<JobQueue["send"]>(async () => {}) };

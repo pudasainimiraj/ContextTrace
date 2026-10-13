@@ -131,7 +131,55 @@ export const ISSUES_STREAM: StreamSpec<GitHubIssue> = {
   }),
 };
 
+/** Shape of an item from GET /repos/{owner}/{repo}/issues/comments. */
+export type GitHubIssueComment = {
+  id: number;
+  node_id: string;
+  url: string;
+  html_url: string; // permalink: .../issues/N#issuecomment-ID, or .../pull/N for a PR
+  issue_url: string; // .../issues/N for issues and pull requests alike
+  user: { login: string } | null;
+  body: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The issue or pull request number at the end of an API URL. */
+export function numberFromUrl(url: string): number {
+  return Number(url.slice(url.lastIndexOf("/") + 1));
+}
+
+/**
+ * Conversation comments on issues and pull requests. GitHub serves both from the
+ * issues/comments endpoint; inline review comments are a separate stream.
+ */
+export const ISSUE_COMMENTS_STREAM: StreamSpec<GitHubIssueComment> = {
+  stream: "issue_comments",
+  listUrl: (repo, since) => listUrl(repo, "issues/comments", since),
+  toSource: (item, repositoryId, jobId) => ({
+    repository_id: repositoryId,
+    type: "issue_comment",
+    github_id: item.id,
+    number: numberFromUrl(item.issue_url),
+    node_id: item.node_id,
+    title: null,
+    author: item.user?.login ?? null,
+    body: item.body,
+    state: null,
+    html_url: item.html_url,
+    api_url: item.url,
+    path: null,
+    line: null,
+    in_reply_to_id: null,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    closed_at: null,
+    fetched_by_job: jobId,
+  }),
+};
+
 /** Job kind -> stream. */
 export const STREAMS: Record<string, StreamSpec<never>> = {
   fetch_issues: ISSUES_STREAM as StreamSpec<never>,
+  fetch_issue_comments: ISSUE_COMMENTS_STREAM as StreamSpec<never>,
 };
