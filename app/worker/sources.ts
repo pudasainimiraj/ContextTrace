@@ -14,14 +14,17 @@ export async function upsertSources(db: SupabaseClient, rows: SourceDraft[]): Pr
   return data as UpsertCounts;
 }
 
+export const MAX_SOURCES_PAGE = 500;
+
 export async function listSources(
   db: SupabaseClient,
   repositoryId: number,
-  filter: { type?: SourceRecord["type"]; number?: number } = {},
+  filter: { type?: SourceRecord["type"]; number?: number; limit?: number } = {},
 ): Promise<SourceRecord[]> {
   let query = db.from("sources").select("*").eq("repository_id", repositoryId).order("github_id");
   if (filter.type) query = query.eq("type", filter.type);
   if (filter.number !== undefined) query = query.eq("number", filter.number);
+  query = query.limit(Math.min(filter.limit ?? MAX_SOURCES_PAGE, MAX_SOURCES_PAGE));
   const { data, error } = await query;
   if (error) throw new Error(`select sources failed: ${error.message}`);
   return (data ?? []) as SourceRecord[];

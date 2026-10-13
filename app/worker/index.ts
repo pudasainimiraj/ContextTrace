@@ -1,9 +1,11 @@
-import type { ApiError } from "../shared/api.ts";
+import type { ApiError, SourceType } from "../shared/api.ts";
 import { consumeJobMessage } from "./consumer.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
+import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
+import { listSources } from "./sources.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
 export default {
@@ -19,6 +21,9 @@ export default {
 
     const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
     if (method === "POST" && jobsOf) return createRepositoryJob(request, env, Number(jobsOf[1]));
+
+    const sourcesOf = /^\/api\/repositories\/(\d+)\/sources$/.exec(pathname);
+    if (method === "GET" && sourcesOf) return listRepositorySources(env, Number(sourcesOf[1]), new URL(request.url));
 
     return error(404, "not_found", "No such route");
   },
@@ -50,10 +55,36 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
   const lookup = await lookupPublicRepository(parsed, { token: env.GITHUB_TOKEN || undefined });
   if (lookup.kind !== "ok") return lookupError(lookup);
 
-  const { row, created } = await upsertRepository(createDb(env), lookup.repo);
+  const db = createDb(env);
+  const { row, created } = await upsertRepository(db, lookup.repo);
+  // A newly registered repository starts its extraction streams at once.
+  if (created) await startExtraction(db, env.JOBS_QUEUE, row.id);
   return created
     ? json(row, { status: 201, headers: { Location: `/api/repositories/${row.id}` } })
     : json(row);
+}
+
+const SOURCE_TYPES: SourceType[] = ["issue", "pull_request", "issue_comment", "review_comment"];
+
+/** GET /api/repositories/:id/sources?type=&number=&limit=  -> stored records with provenance */
+async function listRepositorySources(env: Env, repositoryId: number, url: URL): Promise<Response> {
+  const type = url.searchParams.get("type");
+  if (type !== null && !SOURCE_TYPES.includes(type as SourceType)) {
+    return error(400, "invalid_input", `type must be one of ${SOURCE_TYPES.join(", ")}`);
+  }
+  const number = url.searchParams.get("number");
+  if (number !== null && !/^\d+$/.test(number)) return error(400, "invalid_input", "number must be an integer");
+  const limit = url.searchParams.get("limit");
+  if (limit !== null && !/^\d+$/.test(limit)) return error(400, "invalid_input", "limit must be an integer");
+
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  const sources = await listSources(db, repositoryId, {
+    type: (type as SourceType | null) ?? undefined,
+    number: number === null ? undefined : Number(number),
+    limit: limit === null ? undefined : Number(limit),
+  });
+  return json(sources);
 }
 
 /** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */

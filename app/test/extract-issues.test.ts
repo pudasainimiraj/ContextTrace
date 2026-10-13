@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
@@ -6,6 +6,7 @@ import { type GitHubIssue, MAX_PAGES_PER_RUN, toGitHubTimestamp } from "../worke
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
+import type { SourceRecord } from "../shared/api.ts";
 import { type FakeGitHub, fakeGitHubPages, fakeMessage, jsonResponse, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project with GitHub stubbed; see jobs.test.ts for the
@@ -112,6 +113,32 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
       fetched_by_job: first.job.id,
     });
     expect(sources.find((s) => s.number === 21)?.fetched_by_job).toBe(second.job.id);
+  });
+
+  it("keeps the provenance of every stored record and serves it over the API", async () => {
+    const sources = await listSources(db, REPO_ID);
+    expect(sources).toHaveLength(21);
+    for (const s of sources) {
+      expect(s.html_url).toMatch(/^https:\/\/github\.com\/alice\/extract\/(issues|pull)\/\d+$/);
+      expect(s.api_url).toMatch(/^https:\/\/api\.github\.com\/repos\/alice\/extract\/(issues|pulls)\/\d+$/);
+      expect(s.fetched_by_job).not.toBeNull();
+      expect(Date.now() - Date.parse(s.fetched_at)).toBeLessThan(5 * 60_000);
+      expect(Date.parse(s.updated_at)).toBeGreaterThanOrEqual(Date.parse(s.created_at));
+    }
+
+    const res = await exports.default.fetch(`http://localhost/api/repositories/${REPO_ID}/sources?type=pull_request`);
+    expect(res.status).toBe(200);
+    const served = (await res.json()) as SourceRecord[];
+    expect(served.map((s) => s.number)).toEqual([4, 8, 12, 16, 20]);
+    expect(served[0]).toEqual(sources.find((s) => s.number === 4));
+
+    const one = await exports.default.fetch(`http://localhost/api/repositories/${REPO_ID}/sources?number=7&limit=10`);
+    expect(((await one.json()) as SourceRecord[]).map((s) => [s.type, s.number])).toEqual([["issue", 7]]);
+
+    const badType = await exports.default.fetch(`http://localhost/api/repositories/${REPO_ID}/sources?type=commit`);
+    expect(badType.status).toBe(400);
+    const unknownRepo = await exports.default.fetch(`http://localhost/api/repositories/${REPO_ID + 1}/sources`);
+    expect(unknownRepo.status).toBe(404);
   });
 
   it("passes the high-water mark as since and never overwrites newer stored data with a stale page", async () => {

@@ -103,6 +103,10 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     expect(await missing.json()).toMatchObject({ error: "not_found" });
 
     expect(fakeGitHub).toHaveBeenCalledTimes(3);
+
+    // Registration started one extraction job per stream, once.
+    const { data: jobs } = await createDb(env).from("jobs").select("kind").eq("repository_id", ID_DAGSTER).order("kind");
+    expect(jobs?.map((j) => j.kind)).toEqual(["fetch_issue_comments", "fetch_issues", "fetch_review_comments"]);
   });
 
   it("creates and enqueues a job for a registered repository", async () => {
