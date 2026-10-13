@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
-import { type GitHubIssueComment, toGitHubTimestamp } from "../worker/extract.ts";
+import { type GitHubIssueComment, type GitHubReviewComment, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
@@ -30,6 +30,30 @@ function issueComment(k: number, number: number, opts: { pr?: boolean } = {}): G
     issue_url: `${API}/issues/${number}`,
     user: { login: "carol" },
     body: `comment ${k}`,
+    created_at: at(0),
+    updated_at: at(k),
+  };
+}
+
+/** An inline review comment on pull request `number`. */
+function reviewComment(
+  k: number,
+  number: number,
+  opts: { path?: string; line?: number | null; original_line?: number | null; replyTo?: number } = {},
+): GitHubReviewComment {
+  const id = 7000 + k;
+  return {
+    id,
+    node_id: `RC_${k}`,
+    url: `${API}/pulls/comments/${id}`,
+    html_url: `${WEB}/pull/${number}#discussion_r${id}`,
+    pull_request_url: `${API}/pulls/${number}`,
+    path: opts.path ?? "src/a.ts",
+    line: opts.line === undefined ? 12 : opts.line,
+    original_line: opts.original_line === undefined ? 12 : opts.original_line,
+    in_reply_to_id: opts.replyTo,
+    user: { login: "dave" },
+    body: `review ${k}`,
     created_at: at(0),
     updated_at: at(k),
   };
@@ -97,5 +121,53 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issue_comments", () => {
     expect(job).toMatchObject({ state: "succeeded", result: { records: 1 } });
     expect(github.requests[0].searchParams.get("since")).toBe(at(3));
     expect(await listSources(db, REPO_ID, { number: 8 })).toHaveLength(2);
+  });
+});
+
+describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_review_comments", () => {
+  it("stores inline review comments with their diff position and reply link under an independent checkpoint", async () => {
+    const github = fakeGitHubPages([
+      [
+        reviewComment(1, 8),
+        reviewComment(2, 8, { replyTo: 7001 }),
+        reviewComment(3, 9, { path: "README.md", line: null, original_line: 3 }),
+      ],
+    ]);
+    const { job } = await runJobOfKind("fetch_review_comments", github);
+    expect(job).toMatchObject({ state: "succeeded", result: { pages: 1, records: 3 } });
+    expect(github.requests[0].pathname).toBe("/repos/alice/comments/pulls/comments");
+    expect(github.requests[0].searchParams.has("since")).toBe(false);
+
+    const reviews = await listSources(db, REPO_ID, { type: "review_comment" });
+    expect(reviews.map((r) => [r.github_id, r.number])).toEqual([
+      [7001, 8],
+      [7002, 8],
+      [7003, 9],
+    ]);
+    expect(reviews[0]).toMatchObject({
+      type: "review_comment",
+      path: "src/a.ts",
+      line: 12,
+      in_reply_to_id: null,
+      author: "dave",
+      body: "review 1",
+      html_url: `${WEB}/pull/8#discussion_r7001`,
+      api_url: `${API}/pulls/comments/7001`,
+      fetched_by_job: job.id,
+    });
+    expect(reviews[1].in_reply_to_id).toBe(7001);
+    // An outdated comment keeps its original diff line.
+    expect(reviews[2]).toMatchObject({ path: "README.md", line: 3 });
+
+    // Its checkpoint is separate from the issue-comment stream's.
+    const own = await getCheckpoint(db, REPO_ID, "review_comments");
+    expect(own?.cursor).toBeNull();
+    expect(own?.last_item_at && Date.parse(own.last_item_at)).toBe(Date.parse(at(3)));
+    const other = await getCheckpoint(db, REPO_ID, "issue_comments");
+    expect(other?.last_item_at && Date.parse(other.last_item_at)).toBe(Date.parse(at(4)));
+
+    // Everything on pull request 8, across both comment types.
+    const onPr8 = await listSources(db, REPO_ID, { number: 8 });
+    expect(onPr8.map((s) => s.type)).toEqual(["issue_comment", "issue_comment", "review_comment", "review_comment"]);
   });
 });

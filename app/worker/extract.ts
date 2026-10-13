@@ -178,8 +178,52 @@ export const ISSUE_COMMENTS_STREAM: StreamSpec<GitHubIssueComment> = {
   }),
 };
 
+/** Shape of an item from GET /repos/{owner}/{repo}/pulls/comments. */
+export type GitHubReviewComment = {
+  id: number;
+  node_id: string;
+  url: string;
+  html_url: string; // permalink: .../pull/N#discussion_rID
+  pull_request_url: string; // .../pulls/N
+  path: string;
+  line: number | null; // null once the diff is outdated
+  original_line: number | null;
+  in_reply_to_id?: number;
+  user: { login: string } | null;
+  body: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Inline review comments on pull request diffs, with their own checkpoint. */
+export const REVIEW_COMMENTS_STREAM: StreamSpec<GitHubReviewComment> = {
+  stream: "review_comments",
+  listUrl: (repo, since) => listUrl(repo, "pulls/comments", since),
+  toSource: (item, repositoryId, jobId) => ({
+    repository_id: repositoryId,
+    type: "review_comment",
+    github_id: item.id,
+    number: numberFromUrl(item.pull_request_url),
+    node_id: item.node_id,
+    title: null,
+    author: item.user?.login ?? null,
+    body: item.body,
+    state: null,
+    html_url: item.html_url,
+    api_url: item.url,
+    path: item.path,
+    line: item.line ?? item.original_line,
+    in_reply_to_id: item.in_reply_to_id ?? null,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    closed_at: null,
+    fetched_by_job: jobId,
+  }),
+};
+
 /** Job kind -> stream. */
 export const STREAMS: Record<string, StreamSpec<never>> = {
   fetch_issues: ISSUES_STREAM as StreamSpec<never>,
   fetch_issue_comments: ISSUE_COMMENTS_STREAM as StreamSpec<never>,
+  fetch_review_comments: REVIEW_COMMENTS_STREAM as StreamSpec<never>,
 };
