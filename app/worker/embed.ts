@@ -11,7 +11,9 @@ import {
   usdFor,
   validateVector,
 } from "./embeddings.ts";
+import { refreshRepositoryStatus } from "./repositories.ts";
 import { JobError } from "./retry.ts";
+import { TRANSFORM_VERSION } from "./transform.ts";
 
 export const EMBED_JOB_KIND = "embed_passages";
 /** Batches per job run before the job yields to a continuation job. */
@@ -54,6 +56,8 @@ export type PassageEmbeddingDraft = {
  * is still pending, so a passage that can never be embedded cannot loop forever. Texts
  * are batched by length because Workers AI meters a batch at its longest text. One
  * invalid vector fails one passage; a failing batch keeps the batches stored before it.
+ * The repository status is refreshed after the first stored batch, so the repository is
+ * searchable (partially) within one batch, and again at the end of the run.
  */
 export async function embedPassages(
   ctx: EmbedContext,
@@ -88,6 +92,7 @@ export async function embedPassages(
   for (const p of [...oversized, ...empty]) console.warn(`passage ${p.passage_id} skipped: ${oversized.includes(p) ? "oversized" : "empty"}`);
 
   const ordered = [...eligible].sort((a, b) => a.token_count - b.token_count || (a.passage_id < b.passage_id ? -1 : 1));
+  let firstBatchStored = false;
   try {
     for (const batch of chunk(ordered, batchSize)) {
       const result = await client.embed(batch.map((p) => p.text));
@@ -121,6 +126,10 @@ export async function embedPassages(
         const counts = await upsertPassageEmbeddings(ctx.db, drafts);
         totals.inserted += counts.inserted;
         totals.updated += counts.updated;
+        if (!firstBatchStored) {
+          firstBatchStored = true;
+          await refreshRepositoryStatus(ctx.db, repositoryId, TRANSFORM_VERSION);
+        }
       }
     }
   } finally {
@@ -142,6 +151,7 @@ export async function embedPassages(
       }
     }
   }
+  await refreshRepositoryStatus(ctx.db, repositoryId, TRANSFORM_VERSION);
   return { done: !hasMore, ...totals, neuronsEstimated: neuronsFor(totals.billedTokens) };
 }
 

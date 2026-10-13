@@ -1,11 +1,20 @@
 // Types shared between the Worker (API) and the React app (status screen).
 
+/**
+ * registered: nothing searchable yet. searchable_partial: the first vectors are stored while
+ * extraction, transform or embedding continues. searchable: every stream listed and nothing
+ * is dirty or pending (sticky). inaccessible: GitHub no longer serves the repository.
+ */
+export type RepositoryStatus = "registered" | "searchable_partial" | "searchable" | "inaccessible";
+
 export type RepositoryRecord = {
   id: number;
   owner: string;
   name: string;
   full_name: string;
-  status: string;
+  status: RepositoryStatus;
+  status_changed_at: string;
+  last_error: string | null;
   submission_count: number;
   created_at: string;
   updated_at: string;
@@ -125,6 +134,15 @@ export type EvidenceMatch = "semantic" | "keyword";
 export type SearchMode = "semantic" | "keyword" | "none";
 export type SearchConfidence = "high" | "low" | "none";
 
+/** How much of the repository the search can see, and the warning to show when it is not all of it. */
+export type SearchIndexState = {
+  status: RepositoryStatus;
+  partial: boolean; // true unless the status is searchable
+  embedded: number; // passages with a current vector
+  pending: number; // passages waiting for one
+  warning: string | null;
+};
+
 /** POST /api/search response. The query is embedded on the server; no vector leaves it. */
 export type SearchResponse = {
   repository_id: number;
@@ -135,7 +153,7 @@ export type SearchResponse = {
   message: string | null; // what the reader should know when confidence is not high
   semantic_error: string | null; // error code when the semantic search could not run
   embed_ms: number | null; // wall time of the query embedding call
-  index: { embedded: number; pending: number }; // passages with a current vector, and waiting for one
+  index: SearchIndexState;
   results: EvidenceCard[];
   unverified: number; // hits left out because their source link could not be verified
 };
