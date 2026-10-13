@@ -27,6 +27,7 @@ export type ExtractResult = {
   pages: number;
   records: number; // items received from GitHub
   bytes: number; // response bodies received
+  upsertBytes: number; // JSON sent to upsert_sources
   inserted: number;
   updated: number;
   unchanged: number;
@@ -51,7 +52,7 @@ export async function extractStream<T>(
   const since = checkpoint?.last_item_at ? toGitHubTimestamp(checkpoint.last_item_at) : null;
   let url = checkpoint?.cursor ?? spec.listUrl({ owner: repository.owner, name: repository.name }, since);
   let highWater = checkpoint?.last_item_at ? Date.parse(checkpoint.last_item_at) : 0;
-  const totals = { pages: 0, records: 0, bytes: 0, inserted: 0, updated: 0, unchanged: 0 };
+  const totals = { pages: 0, records: 0, bytes: 0, upsertBytes: 0, inserted: 0, updated: 0, unchanged: 0 };
   const base = { repository_id: repository.id, stream: spec.stream, job_id: jobId };
   const inProgress = (cursor: string) => ({ ...base, cursor, last_item_at: checkpoint?.last_item_at ?? null });
 
@@ -63,6 +64,7 @@ export async function extractStream<T>(
     const rows = newestPerKey(page.items.map((item) => spec.toSource(item, repository.id, jobId)));
     const counts = await upsertSources(ctx.db, rows);
     totals.records += page.items.length; // items received; inserted + updated + unchanged = rows upserted
+    totals.upsertBytes += new TextEncoder().encode(JSON.stringify(rows)).length;
     totals.inserted += counts.inserted;
     totals.updated += counts.updated;
     totals.unchanged += counts.unchanged;
