@@ -2,11 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord } from "../shared/api.ts";
 import { getCheckpoint, saveCheckpoint } from "./checkpoints.ts";
 import { GITHUB_API_ROOT, githubGetPage, type GitHubOptions } from "./github-rest.ts";
+import { JobError } from "./retry.ts";
 import { type SourceDraft, upsertSources } from "./sources.ts";
 
 /** Pages fetched per job run before the job yields to a continuation job. */
 export const MAX_PAGES_PER_RUN = 5;
 export const PER_PAGE = 100;
+/** Stop paging when fewer requests than this remain before the rate limit resets. */
+export const RATE_LIMIT_RESERVE = 20;
 
 export type RepoRef = { owner: string; name: string };
 
@@ -19,14 +22,24 @@ export type StreamSpec<T> = {
 
 export type ExtractContext = GitHubOptions & { db: SupabaseClient };
 
-export type ExtractResult = { done: boolean; pages: number; records: number; bytes: number };
+export type ExtractResult = {
+  done: boolean;
+  pages: number;
+  records: number; // items received from GitHub
+  bytes: number; // response bodies received
+  inserted: number;
+  updated: number;
+  unchanged: number;
+};
 
 /**
  * Page-limited, resumable extraction of one stream. Progress lives in the stream's
  * checkpoint: `cursor` is the next page URL while a listing is in progress, and
  * `last_item_at` is the updated_at high-water mark once a listing completes, which
  * becomes the next listing's `since`. A run that hits MAX_PAGES_PER_RUN saves the cursor
- * and reports done: false so the caller can schedule a continuation.
+ * and reports done: false so the caller can schedule a continuation. A run that is about
+ * to exhaust the rate limit saves the cursor and raises a transient rate_limited error
+ * timed to the reset, so the same job resumes from the cursor afterwards.
  */
 export async function extractStream<T>(
   ctx: ExtractContext,
@@ -38,25 +51,38 @@ export async function extractStream<T>(
   const since = checkpoint?.last_item_at ? toGitHubTimestamp(checkpoint.last_item_at) : null;
   let url = checkpoint?.cursor ?? spec.listUrl({ owner: repository.owner, name: repository.name }, since);
   let highWater = checkpoint?.last_item_at ? Date.parse(checkpoint.last_item_at) : 0;
-  const totals = { pages: 0, records: 0, bytes: 0 };
+  const totals = { pages: 0, records: 0, bytes: 0, inserted: 0, updated: 0, unchanged: 0 };
+  const base = { repository_id: repository.id, stream: spec.stream, job_id: jobId };
+  const inProgress = (cursor: string) => ({ ...base, cursor, last_item_at: checkpoint?.last_item_at ?? null });
 
   for (;;) {
     const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch });
     totals.pages += 1;
     totals.bytes += page.bytes;
 
-    const rows = page.items.map((item) => spec.toSource(item, repository.id, jobId));
-    await upsertSources(ctx.db, rows);
-    totals.records += rows.length;
+    const rows = newestPerKey(page.items.map((item) => spec.toSource(item, repository.id, jobId)));
+    const counts = await upsertSources(ctx.db, rows);
+    totals.records += page.items.length; // items received; inserted + updated + unchanged = rows upserted
+    totals.inserted += counts.inserted;
+    totals.updated += counts.updated;
+    totals.unchanged += counts.unchanged;
     for (const row of rows) highWater = Math.max(highWater, Date.parse(row.updated_at));
 
+    if (page.nextUrl && page.remaining !== null && page.remaining < RATE_LIMIT_RESERVE) {
+      await saveCheckpoint(ctx.db, inProgress(page.nextUrl));
+      const wait = page.resetAt ? Math.max(1, page.resetAt - Math.floor(Date.now() / 1000) + 1) : 60;
+      throw new JobError(
+        "rate_limited",
+        `GitHub rate limit nearly exhausted (${page.remaining} requests left); resuming after the reset`,
+        { transient: true, retryAfterSeconds: wait },
+      );
+    }
     if (page.nextUrl && totals.pages < MAX_PAGES_PER_RUN) {
       url = page.nextUrl;
       continue;
     }
-    const base = { repository_id: repository.id, stream: spec.stream, job_id: jobId };
     if (page.nextUrl) {
-      await saveCheckpoint(ctx.db, { ...base, cursor: page.nextUrl, last_item_at: checkpoint?.last_item_at ?? null });
+      await saveCheckpoint(ctx.db, inProgress(page.nextUrl));
       return { done: false, ...totals };
     }
     await saveCheckpoint(ctx.db, {
@@ -66,6 +92,17 @@ export async function extractStream<T>(
     });
     return { done: true, ...totals };
   }
+}
+
+/** One row per (type, github_id), keeping the newest; a batch cannot update a row twice. */
+export function newestPerKey(rows: SourceDraft[]): SourceDraft[] {
+  const byKey = new Map<string, SourceDraft>();
+  for (const row of rows) {
+    const key = `${row.type}:${row.github_id}`;
+    const seen = byKey.get(key);
+    if (!seen || Date.parse(row.updated_at) >= Date.parse(seen.updated_at)) byKey.set(key, row);
+  }
+  return [...byKey.values()];
 }
 
 /** GitHub wants YYYY-MM-DDTHH:MM:SSZ for `since`. */

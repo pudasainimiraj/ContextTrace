@@ -8,6 +8,7 @@ export type GitHubPage<T> = {
   nextUrl: string | null; // from the Link header
   bytes: number; // response body size
   remaining: number | null; // X-RateLimit-Remaining
+  resetAt: number | null; // X-RateLimit-Reset, epoch seconds
 };
 
 export type GitHubOptions = { token?: string; fetch?: typeof globalThis.fetch };
@@ -48,14 +49,18 @@ export async function githubGetPage<T>(url: string, opts: GitHubOptions = {}): P
   if (!res.ok) throw new JobError("upstream_error", message, { transient: res.status >= 500 });
   if (!Array.isArray(body)) throw new JobError("unexpected_response", "Expected a JSON array", { transient: false });
 
-  const remainingHeader = res.headers.get("X-RateLimit-Remaining");
-  const remaining = remainingHeader === null ? null : Number(remainingHeader);
   return {
     items: body as T[],
     nextUrl: parseNextLink(res.headers.get("Link")),
     bytes: new TextEncoder().encode(text).length,
-    remaining: remaining !== null && Number.isFinite(remaining) ? remaining : null,
+    remaining: integerHeader(res, "X-RateLimit-Remaining"),
+    resetAt: integerHeader(res, "X-RateLimit-Reset"),
   };
+}
+
+function integerHeader(res: Response, name: string): number | null {
+  const value = res.headers.get(name);
+  return value !== null && /^\d+$/.test(value) ? Number(value) : null;
 }
 
 /** The rel="next" target of a Link header, as in fetch_github.py. */

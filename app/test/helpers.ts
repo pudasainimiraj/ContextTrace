@@ -44,9 +44,14 @@ export type FakeGitHub = { fetch: typeof globalThis.fetch; requests: URL[] };
 
 /**
  * A stubbed GitHub list endpoint: serves `pages` in order with rel="next" Link headers
- * and records every request. `respond` can override any request, for error cases.
+ * and records every request. `respond` can override any request, for error cases;
+ * `headersFor` adds headers to a page's response, for rate-limit cases.
  */
-export function fakeGitHubPages(pages: unknown[][], respond?: (url: URL) => Response | undefined): FakeGitHub {
+export function fakeGitHubPages(
+  pages: unknown[][],
+  respond?: (url: URL) => Response | undefined,
+  headersFor?: (page: number) => Record<string, string>,
+): FakeGitHub {
   const requests: URL[] = [];
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
@@ -54,7 +59,7 @@ export function fakeGitHubPages(pages: unknown[][], respond?: (url: URL) => Resp
     const override = respond?.(url);
     if (override) return override;
     const page = Number(url.searchParams.get("page") ?? "1");
-    const headers: Record<string, string> = { "X-RateLimit-Remaining": "4999" };
+    const headers: Record<string, string> = { "X-RateLimit-Remaining": "4999", ...headersFor?.(page) };
     if (page < pages.length) {
       const next = new URL(url);
       next.searchParams.set("page", String(page + 1));
