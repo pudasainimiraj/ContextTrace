@@ -95,6 +95,10 @@ dd {
   color: var(--error);
 }
 
+.notice.warning {
+  border-color: var(--accent);
+}
+
 .results {
   list-style: none;
   padding: 0;

@@ -157,8 +157,9 @@ async function searchRepository(request: Request, env: Env): Promise<Response> {
   }
 
   const db = createDb(env);
-  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
-  return json(await search({ db, embeddings: createEmbeddingClient(env) }, { repositoryId, query, limit }));
+  const repository = await getRepository(db, repositoryId);
+  if (!repository) return error(404, "not_found", "Repository is not registered");
+  return json(await search({ db, embeddings: createEmbeddingClient(env) }, { repository, query, limit }));
 }
 
 function isPositiveInt(value: unknown): value is number {

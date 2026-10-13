@@ -4,7 +4,7 @@ import type { ApiError, SearchResponse } from "../shared/api.ts";
 import { EMBED_JOB_KIND, embedPassages } from "../worker/embed.ts";
 import { EMBEDDING_DIMS, FakeEmbeddingClient, fakeVector } from "../worker/embeddings.ts";
 import { createJob } from "../worker/jobs.ts";
-import { createDb, upsertRepository } from "../worker/repositories.ts";
+import { createDb, getRepository, upsertRepository } from "../worker/repositories.ts";
 import { MAX_QUERY_CHARS, SCORE_HIGH, SCORE_LOW, search } from "../worker/search.ts";
 import { insertPassages, jsonResponse, repoFixture } from "./helpers.ts";
 
@@ -282,7 +282,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY || !env.CLOUDFLARE_ACCOUNT_ID || !env.W
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("search without an embedding client", () => {
   it("serves keyword matches and reports ai_not_configured instead of guessing a vector", async () => {
-    const response = await search({ db }, { repositoryId: REPO, query: "sourdough" });
+    const response = await search({ db }, { repository: (await getRepository(db, REPO))!, query: "sourdough" });
     expect(response).toMatchObject({ mode: "keyword", confidence: "low", semantic_error: "ai_not_configured", embed_ms: null });
     expect(response.results.map((r) => r.passage_id)).toEqual([`github:${REPO}:issue:1:body:3`]);
   });

@@ -5,7 +5,7 @@ import { FakeEmbeddingClient, fakeVector } from "../worker/embeddings.ts";
 import { EXCERPT_CHARS, excerptOf, resolveEvidence, verifySourceLink } from "../worker/evidence.ts";
 import { createJob } from "../worker/jobs.ts";
 import { contentHash } from "../worker/passages.ts";
-import { createDb, upsertRepository } from "../worker/repositories.ts";
+import { createDb, getRepository, upsertRepository } from "../worker/repositories.ts";
 import { search, searchSemantic } from "../worker/search.ts";
 import { insertPassages, repoFixture } from "./helpers.ts";
 
@@ -147,7 +147,8 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("resolveEvidence", () => {
     expect(cards).toHaveLength(3);
     expect(cards.some((c) => c.passage_id === ROGUE_ID)).toBe(false);
 
-    const response = await search({ db, embeddings: new FakeEmbeddingClient() }, { repositoryId: REPO, query: ROGUE, limit: 4 });
+    const repository = (await getRepository(db, REPO))!;
+    const response = await search({ db, embeddings: new FakeEmbeddingClient() }, { repository, query: ROGUE, limit: 4 });
     expect(response).toMatchObject({ mode: "semantic", confidence: "high", message: null, unverified: 1 });
     expect(response.results.map((c) => c.passage_id)).toEqual(cards.map((c) => c.passage_id));
     expect(response.results.every((c) => c.source_url.startsWith("https://github.com/"))).toBe(true);

@@ -152,6 +152,11 @@ function SearchResults({ response }: { response: SearchResponse }) {
   const total = response.index.embedded + response.index.pending;
   return (
     <div aria-live="polite">
+      {response.index.warning && (
+        <p role="status" className="notice warning">
+          {response.index.warning}
+        </p>
+      )}
       {response.message && (
         <p role="status" className={`notice ${response.confidence}`}>
           {response.message}

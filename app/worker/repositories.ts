@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { RepositoryRecord } from "../shared/api.ts";
+import type { RepositoryRecord, RepositoryStatus } from "../shared/api.ts";
 import type { GitHubRepo } from "./github-api.ts";
 
 /** Server-side Supabase client. The secret key bypasses RLS; never expose it to the browser. */
@@ -29,6 +29,24 @@ export async function upsertRepository(
   if (error) throw new Error(`register_repository failed: ${error.message}`);
   const row = data as RepositoryRecord;
   return { row, created: row.submission_count === 1 };
+}
+
+/**
+ * Recomputes the repository's status from what is stored (see refresh_repository_status):
+ * searchable_partial as soon as one vector exists, searchable once every stream listed and
+ * nothing is dirty or pending. Returns the status after the refresh.
+ */
+export async function refreshRepositoryStatus(
+  db: SupabaseClient,
+  repositoryId: number,
+  transformVersion: string,
+): Promise<RepositoryStatus | null> {
+  const { data, error } = await db.rpc("refresh_repository_status", {
+    p_repository_id: repositoryId,
+    p_transform_version: transformVersion,
+  });
+  if (error) throw new Error(`refresh_repository_status failed: ${error.message}`);
+  return (data ?? null) as RepositoryStatus | null;
 }
 
 export async function getRepository(db: SupabaseClient, id: number): Promise<RepositoryRecord | null> {

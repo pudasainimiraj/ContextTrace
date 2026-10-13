@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { SearchConfidence, SearchMode, SearchResponse } from "../shared/api.ts";
+import type { RepositoryRecord, SearchConfidence, SearchIndexState, SearchMode, SearchResponse } from "../shared/api.ts";
 import { embeddingStats } from "./embed.ts";
 import { type EmbeddingClient, validateVector } from "./embeddings.ts";
 import { resolveEvidence } from "./evidence.ts";
@@ -20,7 +20,7 @@ export const SCORE_HIGH = 0.8;
 export const SCORE_LOW = 0.7;
 
 export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient };
-export type SearchRequest = { repositoryId: number; query: string; limit?: number };
+export type SearchRequest = { repository: RepositoryRecord; query: string; limit?: number };
 
 export type SearchMatch = {
   passage_id: string;
@@ -57,12 +57,13 @@ export async function embedQuery(
  * or missing answer is never dressed up as a supported one.
  */
 export async function search(ctx: SearchContext, request: SearchRequest): Promise<SearchResponse> {
-  const { repositoryId } = request;
+  const { repository } = request;
+  const repositoryId = repository.id;
   const query = request.query.trim();
   const limit = Math.min(Math.max(request.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
 
   const [semantic, stats] = await Promise.all([semanticSearch(ctx, repositoryId, query, limit), embeddingStats(ctx.db, repositoryId)]);
-  const index = { embedded: stats.embedded, pending: stats.pending };
+  const index = indexState(repository, stats);
   const top = semantic.hits[0]?.score ?? 0;
 
   let mode: SearchMode;
@@ -112,6 +113,25 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
     results: cards,
     unverified,
   };
+}
+
+/** The index state for the response: a repository that is not fully searchable says so explicitly. */
+export function indexState(repository: RepositoryRecord, stats: { passages: number; embedded: number; pending: number }): SearchIndexState {
+  const { status } = repository;
+  const base = { status, partial: status !== "searchable", embedded: stats.embedded, pending: stats.pending };
+  switch (status) {
+    case "searchable":
+      return { ...base, warning: null };
+    case "inaccessible":
+      return { ...base, warning: "The source repository is no longer accessible on GitHub; results reflect the last successful sync and may be stale." };
+    case "searchable_partial":
+      return {
+        ...base,
+        warning: `Partial index: ${stats.embedded} of ${stats.passages} passages are searchable while extraction and indexing continue; older discussions may be missing.`,
+      };
+    default:
+      return { ...base, warning: "The index is still being built; nothing from this repository is searchable yet." };
+  }
 }
 
 /** The semantic hits, or the error code that stopped them; only the model's own failures are caught. */
