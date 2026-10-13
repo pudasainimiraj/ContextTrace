@@ -117,15 +117,25 @@ export type EvidenceCard = {
   created_at: string; // GitHub time of the source unit
   source_url: string; // verified github.com permalink to the thread, anchored to the comment
   excerpt: string; // start of the passage on one line, cut at a word boundary
-  score: number;
+  score: number; // cosine similarity for a semantic match, ts_rank_cd for a keyword match
+  match: EvidenceMatch;
 };
+
+export type EvidenceMatch = "semantic" | "keyword";
+export type SearchMode = "semantic" | "keyword" | "none";
+export type SearchConfidence = "high" | "low" | "none";
 
 /** POST /api/search response. The query is embedded on the server; no vector leaves it. */
 export type SearchResponse = {
   repository_id: number;
   query: string; // as searched, trimmed
   limit: number;
-  embed_ms: number; // wall time of the query embedding call
+  mode: SearchMode; // where the results come from
+  confidence: SearchConfidence; // high: close semantic matches; low: weak or keyword-only; none: nothing shown
+  message: string | null; // what the reader should know when confidence is not high
+  semantic_error: string | null; // error code when the semantic search could not run
+  embed_ms: number | null; // wall time of the query embedding call
+  index: { embedded: number; pending: number }; // passages with a current vector, and waiting for one
   results: EvidenceCard[];
   unverified: number; // hits left out because their source link could not be verified
 };

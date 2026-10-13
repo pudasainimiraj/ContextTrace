@@ -4,7 +4,7 @@ import { EMBED_JOB_KIND, embedPassages } from "../worker/embed.ts";
 import { FakeEmbeddingClient, fakeVector } from "../worker/embeddings.ts";
 import { createJob } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
-import { belongsToRepository, searchSemantic } from "../worker/search.ts";
+import { belongsToRepository, searchKeyword, searchSemantic } from "../worker/search.ts";
 import { insertPassages, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project; see jobs.test.ts for the id scheme. Two
@@ -82,5 +82,34 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository isolation", () => {
     await expect(searchSemantic(db, Number.NaN, fakeVector(TEXTS[0]))).rejects.toThrow(/invalid repository id/);
     expect(belongsToRepository(`github:${REPO_A}:issue:1`, REPO_A)).toBe(true);
     expect(belongsToRepository(`github:${REPO_A}1:issue:1`, REPO_A)).toBe(false);
+  });
+});
+
+describe.skipIf(!env.SUPABASE_SECRET_KEY)("searchKeyword", () => {
+  it("finds passages by their words, within the repository only", async () => {
+    const hits = await searchKeyword(db, REPO_A, "daylight saving", 5);
+    expect(hits.map((h) => h.passage_id)).toEqual([`github:${REPO_A}:issue:1:body:1`]);
+    expect(hits[0].document_id).toBe(`github:${REPO_A}:issue:1`);
+    expect(hits[0].score).toBeGreaterThan(0);
+    const twin = await searchKeyword(db, REPO_B, "daylight saving", 5);
+    expect(twin.map((h) => h.passage_id)).toEqual([`github:${REPO_B}:issue:1:body:1`]);
+  });
+
+  it("stems words, honours phrases and exclusions, and ignores stopword-only queries", async () => {
+    expect((await searchKeyword(db, REPO_A, "concurrency limits", 5)).map((h) => h.passage_id)).toEqual([`github:${REPO_A}:issue:1:body:0`]);
+    expect(await searchKeyword(db, REPO_A, '"sourdough bread"', 5)).toHaveLength(1);
+    expect(await searchKeyword(db, REPO_A, '"bread sourdough"', 5)).toEqual([]);
+    expect(await searchKeyword(db, REPO_A, "sourdough -bread", 5)).toEqual([]);
+    expect(await searchKeyword(db, REPO_A, "the of a", 5)).toEqual([]);
+    expect(await searchKeyword(db, REPO_A, "zebras", 5)).toEqual([]);
+    await expect(searchKeyword(db, 0, "zebras")).rejects.toThrow(/invalid repository id/);
+  });
+
+  it("finds a passage that has no vector yet, which the semantic search cannot", async () => {
+    const text = "Zebras graze at dawn.";
+    await insertPassages(db, REPO_A, [{ text }], TEXTS.length);
+    expect((await searchKeyword(db, REPO_A, "zebras", 5)).map((h) => h.passage_id)).toEqual([`github:${REPO_A}:issue:1:body:${TEXTS.length}`]);
+    expect(await searchKeyword(db, REPO_B, "zebras", 5)).toEqual([]);
+    expect((await searchSemantic(db, REPO_A, fakeVector(text), 10)).some((h) => h.passage_id.endsWith(`:body:${TEXTS.length}`))).toBe(false);
   });
 });

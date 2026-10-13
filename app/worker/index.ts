@@ -8,7 +8,6 @@ import { embeddingStats } from "./embed.ts";
 import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
-import { JobError } from "./retry.ts";
 import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
 import { listSources } from "./sources.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
@@ -143,7 +142,7 @@ async function getEmbeddingStats(env: Env, repositoryId: number): Promise<Respon
   return json(await embeddingStats(db, repositoryId));
 }
 
-/** POST /api/search  body: { repositoryId, query, limit? } -> ranked passages, query embedded on the server */
+/** POST /api/search  body: { repositoryId, query, limit? } -> evidence cards, query embedded on the server */
 async function searchRepository(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -159,27 +158,7 @@ async function searchRepository(request: Request, env: Env): Promise<Response> {
 
   const db = createDb(env);
   if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
-  try {
-    return json(await search({ db, embeddings: createEmbeddingClient(env) }, { repositoryId, query, limit }));
-  } catch (err) {
-    if (err instanceof JobError) return embeddingError(err);
-    throw err;
-  }
-}
-
-/** The model's failure, without its message: the client gets a code, the log gets the detail. */
-function embeddingError(err: JobError): Response {
-  console.error(`query embedding failed: ${err.code}: ${err.message}`);
-  switch (err.code) {
-    case "ai_not_configured":
-      return error(503, "search_unavailable", "Semantic search is not configured on this server");
-    case "ai_rate_limited": {
-      const seconds = err.retryAfterSeconds ?? 60;
-      return error(503, "rate_limited", `Embedding rate limit reached; retry in ${seconds}s`, { "Retry-After": String(seconds) });
-    }
-    default:
-      return error(502, "embedding_failed", `The query could not be embedded (${err.code})`);
-  }
+  return json(await search({ db, embeddings: createEmbeddingClient(env) }, { repositoryId, query, limit }));
 }
 
 function isPositiveInt(value: unknown): value is number {

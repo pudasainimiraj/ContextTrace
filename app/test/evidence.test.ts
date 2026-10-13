@@ -133,7 +133,10 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("resolveEvidence", () => {
       source_url: "https://github.com/o/r/issues/1",
     });
     expect(cards[0].excerpt).toBe(excerptOf(TEXTS[1]));
+    expect(cards[0].match).toBe("semantic");
     expect(cards[0]).not.toHaveProperty("text");
+    const keyword = await resolveEvidence(db, REPO, hits.slice(0, 1), "keyword");
+    expect(keyword.cards[0].match).toBe("keyword");
   });
 
   it("leaves out a hit whose source link cannot be verified and counts it", async () => {
@@ -145,7 +148,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("resolveEvidence", () => {
     expect(cards.some((c) => c.passage_id === ROGUE_ID)).toBe(false);
 
     const response = await search({ db, embeddings: new FakeEmbeddingClient() }, { repositoryId: REPO, query: ROGUE, limit: 4 });
-    expect(response.unverified).toBe(1);
+    expect(response).toMatchObject({ mode: "semantic", confidence: "high", message: null, unverified: 1 });
     expect(response.results.map((c) => c.passage_id)).toEqual(cards.map((c) => c.passage_id));
     expect(response.results.every((c) => c.source_url.startsWith("https://github.com/"))).toBe(true);
   });

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DocumentType, EvidenceCard, SearchHit, SourceType } from "../shared/api.ts";
+import type { DocumentType, EvidenceCard, EvidenceMatch, SearchHit, SourceType } from "../shared/api.ts";
 
 /** Excerpt length in code points; a sentence or two, enough to judge a result before opening it. */
 export const EXCERPT_CHARS = 300;
@@ -67,6 +67,7 @@ export async function resolveEvidence(
   db: SupabaseClient,
   repositoryId: number,
   hits: SearchHit[],
+  match: EvidenceMatch = "semantic",
 ): Promise<{ cards: EvidenceCard[]; unverified: number }> {
   if (hits.length === 0) return { cards: [], unverified: 0 };
   const { data, error } = await db
@@ -105,6 +106,7 @@ export async function resolveEvidence(
       source_url: row.source_url,
       excerpt: excerptOf(row.text),
       score: hit.score,
+      match,
     });
   }
   return { cards, unverified };

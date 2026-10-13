@@ -111,7 +111,7 @@ function SearchPanel({ repositoryId }: { repositoryId: number }) {
       });
       const body = (await res.json()) as SearchResponse | ApiError;
       if (!res.ok) {
-        const message = "message" in body ? body.message : `Request failed (${res.status})`;
+        const message = "error" in body ? body.message : `Request failed (${res.status})`;
         setPhase({ kind: "error", message });
         return;
       }
@@ -149,13 +149,25 @@ function SearchPanel({ repositoryId }: { repositoryId: number }) {
 }
 
 function SearchResults({ response }: { response: SearchResponse }) {
-  if (response.results.length === 0) return <p className="notice">No results for “{response.query}”.</p>;
+  const total = response.index.embedded + response.index.pending;
   return (
-    <ol className="results" aria-live="polite">
-      {response.results.map((card) => (
-        <EvidenceCardView key={card.passage_id} card={card} />
-      ))}
-    </ol>
+    <div aria-live="polite">
+      {response.message && (
+        <p role="status" className={`notice ${response.confidence}`}>
+          {response.message}
+        </p>
+      )}
+      <p className="meta">
+        {response.results.length} result{response.results.length === 1 ? "" : "s"} · {response.mode} search · {response.index.embedded} of{" "}
+        {total} passages embedded
+        {response.unverified > 0 ? ` · ${response.unverified} left out without a verified link` : ""}
+      </p>
+      <ol className="results">
+        {response.results.map((card) => (
+          <EvidenceCardView key={card.passage_id} card={card} />
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -168,7 +180,7 @@ function EvidenceCardView({ card }: { card: EvidenceCard }) {
       </a>
       <p className="meta">
         {kind} #{card.number} · {card.locator}
-        {card.author ? ` · ${card.author}` : ""} · {card.created_at.slice(0, 10)} · score {card.score.toFixed(2)}
+        {card.author ? ` · ${card.author}` : ""} · {card.created_at.slice(0, 10)} · {card.match} match {card.score.toFixed(2)}
       </p>
       <p className="excerpt">{card.excerpt}</p>
     </li>
