@@ -1,0 +1,27 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:6",
+  "issue": {
+    "title": "Scheduler configuration",
+    "author": "ann",
+    "created_at": "2024-08-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/6",
+    "body": "How should the scheduler be configured?"
+  },
+  "comments": [
+    {
+      "id": 1,
+      "author": "bob",
+      "created_at": "2024-08-02T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/6#issuecomment-1",
+      "body": "Config:\n\n```yaml\nscheduler:\n  kind: tick\n  interval: 30s\n```\n\nThat is all."
+    },
+    {
+      "id": 2,
+      "author": "cy",
+      "created_at": "2024-08-03T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/6#issuecomment-2",
+      "body": "Full pipeline:\n\n```text\nstep_01 load raw events\nstep_02 drop duplicate rows\nstep_03 join customer table\nstep_04 compute daily totals\nstep_05 write parquet files\nstep_06 refresh the dashboard\nstep_07 notify the channel\nstep_08 archive old partitions\n```"
+    }
+  ]
+}

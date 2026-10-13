@@ -3,6 +3,7 @@ import { consumeJobMessage } from "./consumer.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
+import { listPassages } from "./documents.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
 import { listSources } from "./sources.ts";
@@ -24,6 +25,9 @@ export default {
 
     const sourcesOf = /^\/api\/repositories\/(\d+)\/sources$/.exec(pathname);
     if (method === "GET" && sourcesOf) return listRepositorySources(env, Number(sourcesOf[1]), new URL(request.url));
+
+    const passagesOf = /^\/api\/repositories\/(\d+)\/passages$/.exec(pathname);
+    if (method === "GET" && passagesOf) return listRepositoryPassages(env, Number(passagesOf[1]), new URL(request.url));
 
     return error(404, "not_found", "No such route");
   },
@@ -101,6 +105,22 @@ async function createRepositoryJob(request: Request, env: Env, repositoryId: num
   const job = await enqueueJob(db, env.JOBS_QUEUE, created.id);
   if (!job) throw new Error(`job ${created.id} could not be enqueued`);
   return json(job, { status: 202 });
+}
+
+/** GET /api/repositories/:id/passages?number=&limit=  -> transformed passages, newest thread order */
+async function listRepositoryPassages(env: Env, repositoryId: number, url: URL): Promise<Response> {
+  const number = url.searchParams.get("number");
+  if (number !== null && !/^\d+$/.test(number)) return error(400, "invalid_input", "number must be an integer");
+  const limit = url.searchParams.get("limit");
+  if (limit !== null && !/^\d+$/.test(limit)) return error(400, "invalid_input", "limit must be an integer");
+
+  const db = createDb(env);
+  if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
+  const passages = await listPassages(db, repositoryId, {
+    number: number === null ? undefined : Number(number),
+    limit: limit === null ? undefined : Number(limit),
+  });
+  return json(passages);
 }
 
 /** GET /api/repositories/:id */

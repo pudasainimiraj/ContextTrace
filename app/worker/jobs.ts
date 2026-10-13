@@ -110,3 +110,28 @@ export async function finishJob(
   if (error) throw new Error(`finish job failed: ${error.message}`);
   return data as JobRecord | null;
 }
+
+/**
+ * Creates and enqueues a job of `kind` unless one is already queued or waiting to retry
+ * for the repository; returns null in that case. A running job does not block: it may have
+ * chosen its work before the latest data landed, and a duplicate run that finds nothing to
+ * do is cheap.
+ */
+export async function ensureQueuedJob(
+  db: SupabaseClient,
+  queue: JobQueue,
+  repositoryId: number,
+  kind: string,
+): Promise<JobRecord | null> {
+  const { data, error } = await db
+    .from("jobs")
+    .select("id")
+    .eq("repository_id", repositoryId)
+    .eq("kind", kind)
+    .in("state", ["queued", "retry_pending"])
+    .limit(1);
+  if (error) throw new Error(`select jobs failed: ${error.message}`);
+  if (data && data.length > 0) return null;
+  const job = await createJob(db, repositoryId, kind);
+  return enqueueJob(db, queue, job.id);
+}

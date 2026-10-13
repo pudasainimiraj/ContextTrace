@@ -102,7 +102,10 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ error: "not_found" });
 
-    expect(fakeGitHub).toHaveBeenCalledTimes(3);
+    // The local queue may already have delivered the extraction jobs, whose page requests
+    // also hit the stub, so count only the repository lookups.
+    const lookups = fakeGitHub.mock.calls.filter(([input]) => new URL(hrefOf(input)).pathname === "/repos/dagster-io/dagster");
+    expect(lookups).toHaveLength(3);
 
     // Registration started one extraction job per stream, once.
     const { data: jobs } = await createDb(env).from("jobs").select("kind").eq("repository_id", ID_DAGSTER).order("kind");

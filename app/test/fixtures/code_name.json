@@ -1,0 +1,27 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:5",
+  "issue": {
+    "title": "Auto-materialize defaults",
+    "author": "ann",
+    "created_at": "2024-07-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/5",
+    "body": "Set `AutoMaterializePolicy` on the asset."
+  },
+  "comments": [
+    {
+      "id": 51,
+      "author": "bob",
+      "created_at": "2024-07-02T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/5#issuecomment-51",
+      "body": "The plain word AutoMaterializePolicy also appears here, and so does AutoMaterializePolicy.eager() with a call."
+    },
+    {
+      "id": 52,
+      "author": "cy",
+      "created_at": "2024-07-03T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/5#issuecomment-52",
+      "body": "Bold **AutoMaterializePolicy** and a fence:\r\n\r\n```python\r\n@asset(auto_materialize_policy=AutoMaterializePolicy.lazy())\r\ndef my_asset(): ...\r\n```"
+    }
+  ]
+}

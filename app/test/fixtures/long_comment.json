@@ -1,0 +1,20 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:2",
+  "issue": {
+    "title": "Scheduler rewrite",
+    "author": "ann",
+    "created_at": "2024-04-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/2",
+    "body": "Tracking issue for the scheduler rewrite."
+  },
+  "comments": [
+    {
+      "id": 900,
+      "author": "ann",
+      "created_at": "2024-04-15T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/2#issuecomment-900",
+      "body": "We spent two weeks evaluating the options for the scheduler rewrite, and this comment records the reasoning so nobody has to reconstruct it later.\n\nOption one was to keep the cron-based scheduler and patch the drift problem. The patch was small, but every reviewer agreed it would only hide the drift until the next daylight saving change.\n\nOption two was to adopt the tick-based scheduler from the experimental branch. It fixes drift by design, because every tick is derived from the previous one instead of from wall-clock time.\n\nThe main objection to option two was migration cost. Existing deployments store cron strings in their configuration, and we did not want to force every user to rewrite them.\n\nWe resolved the objection by shipping a translator that converts cron strings into tick definitions at load time. The translator is lossless for every expression in our test corpus.\n\nDecision: adopt the tick-based scheduler in the next minor release, keep the cron syntax as the user-facing format, and remove the old scheduler two releases later.\n\nOpen question: whether the translator should warn on expressions that have no exact tick equivalent. We will decide that in a follow-up."
+    }
+  ]
+}

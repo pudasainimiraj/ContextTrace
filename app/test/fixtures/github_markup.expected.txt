@@ -1,0 +1,30 @@
+# Release notes
+
+Click to expand
+
+| Column | Value |
+| --- | --- |
+| bold cell | `code cell` |
+
+- [x] done task
+- [ ] open task
+- plus bullet
+- star bullet
+
+1. first
+2. second with emphasis and strike
+
+> quoted text with a fence inside:
+>
+> ```sh
+> echo "**not bold** &amp; kept"
+> ```
+
+See the docs (https://example.com/docs) and https://example.com/raw.
+
+[image: A screenshot]
+[image]
+
+Spaces here, a © sign, 5 < 6, and a legacy & without a semicolon.
+
+Final paragraph with __init__, snake_case_name, a*b*c and *args.

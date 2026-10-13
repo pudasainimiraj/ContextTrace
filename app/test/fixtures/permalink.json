@@ -1,0 +1,20 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:9",
+  "issue": {
+    "title": "Policy evaluation order",
+    "author": "ann",
+    "created_at": "2024-09-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/9",
+    "body": "In which order are policies evaluated?"
+  },
+  "comments": [
+    {
+      "id": 777,
+      "author": "bob",
+      "created_at": "2024-09-02T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/9#issuecomment-777",
+      "body": "Policies are evaluated in declaration order, which surprised several users who expected priority order.\n\nThe relevant loop is here: https://github.com/example/project/blob/0a1b2c3d/src/scheduler/policy.py#L42-L57 and it has not changed since the rewrite.\n\nWe decided to keep declaration order because changing it would silently alter existing deployments."
+    }
+  ]
+}
