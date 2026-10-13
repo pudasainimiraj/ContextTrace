@@ -1,0 +1,20 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:1",
+  "issue": {
+    "title": "Replace the legacy API",
+    "author": "ann",
+    "created_at": "2024-03-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/1",
+    "body": "Proposal: replace the legacy API with the new client."
+  },
+  "comments": [
+    {
+      "id": 123,
+      "author": "bob",
+      "created_at": "2024-03-02T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/1#issuecomment-123",
+      "body": "We replaced the API to simplify deployment."
+    }
+  ]
+}

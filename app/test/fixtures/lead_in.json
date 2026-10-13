@@ -1,0 +1,12 @@
+{
+  "type": "discussion",
+  "document_id": "github:example/project:discussion:12",
+  "discussion": {
+    "title": "Migration guide",
+    "author": "ann",
+    "created_at": "2024-11-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/discussions/12",
+    "body": "This guide explains how to move from the old policy to the new checks without downtime.\n\nYou could instead construct the check like so:\n\n```python\ncheck = build_check(deadline=\"0 9 * * *\")\n```\n\n## Why this change\n\nThe old policy computed data time in a way that confused many users and could not be overridden.\n\nF.A.Q.\n\n- Will the old policy be removed? Yes, two releases later."
+  },
+  "comments": []
+}

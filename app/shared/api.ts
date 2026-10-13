@@ -59,3 +59,39 @@ export type SourceRecord = {
   fetched_at: string;
   fetched_by_job: number | null;
 };
+
+export type DocumentType = "issue" | "pull_request";
+
+/** One transformed conversation thread. */
+export type DocumentRecord = {
+  document_id: string; // github:{repository_id}:{type}:{number}
+  repository_id: number;
+  type: DocumentType;
+  number: number;
+  title: string;
+  transform_version: string;
+  sources_fetched_at: string;
+  transformed_at: string;
+};
+
+/** One embedding-ready passage from exactly one source unit. */
+export type PassageRecord = {
+  passage_id: string;
+  document_id: string;
+  repository_id: number;
+  source_type: SourceType;
+  source_github_id: number;
+  chunk_index: number;
+  chunk_count: number;
+  token_count: number; // model input length: [CLS] + text tokens + [SEP]
+  tokenizer: string;
+  locator: string;
+  author: string | null;
+  created_at: string; // GitHub time of the source unit
+  source_url: string;
+  text: string;
+  text_kind: "normalized_markdown";
+  content_hash: string; // sha256 hex of text
+  transform_version: string;
+  updated_at: string;
+};

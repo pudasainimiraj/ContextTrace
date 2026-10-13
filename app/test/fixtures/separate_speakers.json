@@ -1,0 +1,27 @@
+{
+  "type": "issue",
+  "document_id": "github:example/project:issue:3",
+  "issue": {
+    "title": "Deprecate FreshnessPolicy",
+    "author": "ann",
+    "created_at": "2024-05-01T10:00:00Z",
+    "html_url": "https://github.com/example/project/issues/3",
+    "body": "Should we deprecate FreshnessPolicy?"
+  },
+  "comments": [
+    {
+      "id": 11,
+      "author": "ann",
+      "created_at": "2024-05-02T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/3#issuecomment-11",
+      "body": "Yes, the policy confuses users."
+    },
+    {
+      "id": 12,
+      "author": "bob",
+      "created_at": "2024-05-03T10:00:00Z",
+      "html_url": "https://github.com/example/project/issues/3#issuecomment-12",
+      "body": "No, the policy is fine as it is."
+    }
+  ]
+}
