@@ -87,15 +87,28 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY || !env.CLOUDFLARE_ACCOUNT_ID || !env.W
     const res = await post({ repositoryId: REPO, query: ` ${TEXTS[1]} ` });
     expect(res.status).toBe(200);
     const body = (await res.json()) as SearchResponse;
-    expect(body).toMatchObject({ repository_id: REPO, query: TEXTS[1], limit: 5 });
+    expect(body).toMatchObject({ repository_id: REPO, query: TEXTS[1], limit: 5, unverified: 0 });
     expect(body.results).toHaveLength(TEXTS.length);
-    expect(body.results[0]).toMatchObject({ passage_id: `github:${REPO}:issue:1:body:1`, document_id: `github:${REPO}:issue:1` });
+    expect(body.results[0]).toMatchObject({
+      passage_id: `github:${REPO}:issue:1:body:1`,
+      document_id: `github:${REPO}:issue:1`,
+      type: "issue",
+      number: 1,
+      title: "Fixture thread",
+      source_type: "issue",
+      locator: "Opening body (part 2)",
+      author: "ann",
+      source_url: "https://github.com/o/r/issues/1",
+      excerpt: TEXTS[1],
+    });
     expect(body.results[0].score).toBeCloseTo(1, 4);
     expect(body.results.map((r) => r.score)).toEqual([...body.results.map((r) => r.score)].sort((a, b) => b - a));
     // One call to Workers AI from the Worker, pinned to the passages' pooling; the
-    // response carries scores and ids only, never a vector or a model.
+    // response carries cards only, never a vector, a model or the passage's full text.
     expect(aiCalls).toEqual([{ text: [TEXTS[1]], pooling: "cls" }]);
-    expect(Object.keys(body.results[0]).sort()).toEqual(["document_id", "passage_id", "score"]);
+    expect(Object.keys(body.results[0]).sort()).toEqual([
+      "author", "created_at", "document_id", "excerpt", "locator", "number", "passage_id", "score", "source_type", "source_url", "title", "type",
+    ]);
   });
 
   it("applies the limit and rejects one outside 1 to 10", async () => {

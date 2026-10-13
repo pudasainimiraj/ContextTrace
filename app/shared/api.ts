@@ -104,13 +104,30 @@ export type SearchHit = {
   score: number; // 1 = identical text
 };
 
+/** One search result, resolved from its passage and thread: enough to read and to verify at the source. */
+export type EvidenceCard = {
+  passage_id: string;
+  document_id: string;
+  type: DocumentType;
+  number: number; // issue or pull request number
+  title: string; // thread title
+  source_type: SourceType;
+  locator: string; // where in the thread, e.g. "Comment 2 of 5"
+  author: string | null;
+  created_at: string; // GitHub time of the source unit
+  source_url: string; // verified github.com permalink to the thread, anchored to the comment
+  excerpt: string; // start of the passage on one line, cut at a word boundary
+  score: number;
+};
+
 /** POST /api/search response. The query is embedded on the server; no vector leaves it. */
 export type SearchResponse = {
   repository_id: number;
   query: string; // as searched, trimmed
   limit: number;
   embed_ms: number; // wall time of the query embedding call
-  results: SearchHit[];
+  results: EvidenceCard[];
+  unverified: number; // hits left out because their source link could not be verified
 };
 
 /** Embedding coverage and metering for one repository. */

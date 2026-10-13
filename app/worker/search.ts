@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SearchResponse } from "../shared/api.ts";
 import { type EmbeddingClient, validateVector } from "./embeddings.ts";
+import { resolveEvidence } from "./evidence.ts";
 import { JobError } from "./retry.ts";
 
 /** Results per search; the evidence cards show the top 3 to 5. */
@@ -40,13 +41,14 @@ export async function embedQuery(
   return { vector, durationMs: result.durationMs };
 }
 
-/** One search: embed the query, then rank the repository's passages against it. */
+/** One search: embed the query, rank the repository's passages, resolve the top hits into cards. */
 export async function search(ctx: SearchContext, request: SearchRequest): Promise<SearchResponse> {
   const query = request.query.trim();
   const limit = Math.min(Math.max(request.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
   const { vector, durationMs } = await embedQuery(ctx.embeddings, query);
-  const results = await searchSemantic(ctx.db, request.repositoryId, vector, limit);
-  return { repository_id: request.repositoryId, query, limit, embed_ms: durationMs, results };
+  const hits = await searchSemantic(ctx.db, request.repositoryId, vector, limit);
+  const { cards, unverified } = await resolveEvidence(ctx.db, request.repositoryId, hits);
+  return { repository_id: request.repositoryId, query, limit, embed_ms: durationMs, results: cards, unverified };
 }
 
 /**
