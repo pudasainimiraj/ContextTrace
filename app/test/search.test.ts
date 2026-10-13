@@ -4,7 +4,7 @@ import { EMBED_JOB_KIND, embedPassages } from "../worker/embed.ts";
 import { FakeEmbeddingClient, fakeVector } from "../worker/embeddings.ts";
 import { createJob } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
-import { searchSemantic } from "../worker/search.ts";
+import { belongsToRepository, searchSemantic } from "../worker/search.ts";
 import { insertPassages, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project; see jobs.test.ts for the id scheme. Two
@@ -50,5 +50,37 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("searchSemantic", () => {
     expect(await searchSemantic(db, REPO_A, fakeVector(TEXTS[0]), 50)).toHaveLength(TEXTS.length);
     expect(await searchSemantic(db, REPO_A, fakeVector(TEXTS[0]), 0)).toHaveLength(1);
     expect(await searchSemantic(db, REPO_A + 7, fakeVector(TEXTS[0]))).toEqual([]);
+  });
+});
+
+describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository isolation", () => {
+  it("never returns another repository's passages, even for identical texts", async () => {
+    for (const [mine, other] of [
+      [REPO_A, REPO_B],
+      [REPO_B, REPO_A],
+    ]) {
+      for (const text of TEXTS) {
+        const matches = await searchSemantic(db, mine, fakeVector(text), 10);
+        expect(matches).toHaveLength(TEXTS.length);
+        expect(matches.every((m) => m.passage_id.startsWith(`github:${mine}:`))).toBe(true);
+        expect(matches.every((m) => belongsToRepository(m.document_id, mine))).toBe(true);
+        expect(matches.some((m) => m.passage_id.includes(`github:${other}:`))).toBe(false);
+      }
+    }
+  });
+
+  it("scores the same text identically in both repositories, so isolation is not a ranking artefact", async () => {
+    const [a] = await searchSemantic(db, REPO_A, fakeVector(TEXTS[3]), 1);
+    const [b] = await searchSemantic(db, REPO_B, fakeVector(TEXTS[3]), 1);
+    expect(a.passage_id).toBe(`github:${REPO_A}:issue:1:body:3`);
+    expect(b.passage_id).toBe(`github:${REPO_B}:issue:1:body:3`);
+    expect(a.score).toBeCloseTo(b.score, 5);
+  });
+
+  it("rejects an invalid repository id before querying", async () => {
+    await expect(searchSemantic(db, 0, fakeVector(TEXTS[0]))).rejects.toThrow(/invalid repository id/);
+    await expect(searchSemantic(db, Number.NaN, fakeVector(TEXTS[0]))).rejects.toThrow(/invalid repository id/);
+    expect(belongsToRepository(`github:${REPO_A}:issue:1`, REPO_A)).toBe(true);
+    expect(belongsToRepository(`github:${REPO_A}1:issue:1`, REPO_A)).toBe(false);
   });
 });
