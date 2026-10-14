@@ -87,7 +87,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issue_comments", () => {
 
     const request = github.requests[0];
     expect(request.pathname).toBe("/repos/alice/comments/issues/comments");
-    expect(Object.fromEntries(request.searchParams)).toMatchObject({ sort: "updated", direction: "asc", per_page: "100" });
+    expect(Object.fromEntries(request.searchParams)).toMatchObject({ sort: "updated", direction: "desc", per_page: "100" });
 
     const comments = await listSources(db, REPO_ID, { type: "issue_comment" });
     expect(comments.map((c) => [c.github_id, c.number])).toEqual([
@@ -110,7 +110,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issue_comments", () => {
 
     // The stream has its own checkpoint; the issues stream is untouched.
     const checkpoint = await getCheckpoint(db, REPO_ID, "issue_comments");
-    expect(checkpoint?.cursor).toBeNull();
+    expect(checkpoint).toMatchObject({ cursor: null, head_done_at: expect.any(String), backfill_done_at: expect.any(String) });
     expect(checkpoint?.last_item_at && Date.parse(checkpoint.last_item_at)).toBe(Date.parse(at(3)));
     expect(await getCheckpoint(db, REPO_ID, "issues")).toBeNull();
   });
@@ -118,8 +118,9 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issue_comments", () => {
   it("resumes from the comment stream's own high-water mark", async () => {
     const github = fakeGitHubPages([[issueComment(4, 8)]]);
     const { job } = await runJobOfKind("fetch_issue_comments", github);
-    expect(job).toMatchObject({ state: "succeeded", result: { records: 1 } });
+    expect(job).toMatchObject({ state: "succeeded", result: { phase: "sync", records: 1 } });
     expect(github.requests[0].searchParams.get("since")).toBe(at(3));
+    expect(github.requests[0].searchParams.get("direction")).toBe("asc");
     expect(await listSources(db, REPO_ID, { number: 8 })).toHaveLength(2);
   });
 });

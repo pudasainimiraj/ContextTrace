@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
-import { type GitHubIssue, MAX_PAGES_PER_RUN, toGitHubTimestamp } from "../worker/extract.ts";
+import { BACKFILL_DELAY_SECONDS, BACKFILL_PAGES_PER_RUN, type GitHubIssue, HEAD_PAGES_PER_RUN, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
@@ -63,43 +63,58 @@ afterAll(async () => {
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
   const pages = Array.from({ length: 7 }, (_, p) => [1, 2, 3].map((k) => issue(p * 3 + k, { pr: (p * 3 + k) % 4 === 0 })));
 
-  it("extracts issues and pull requests up to the page budget, then continues from the cursor", async () => {
+  it("fetches the newest pages first, hands the rest to a delayed backfill that continues from its cursor", async () => {
     const github = fakeGitHub(pages);
-    const first = await runJobOfKind("fetch_issues", github);
+    const head = await runJobOfKind("fetch_issues", github);
 
-    expect(first.message.ack).toHaveBeenCalledTimes(1);
-    expect(first.job).toMatchObject({ state: "succeeded", result: { pages: MAX_PAGES_PER_RUN, records: 15 } });
-    expect((first.job.result as { bytes: number }).bytes).toBeGreaterThan(0);
+    expect(head.message.ack).toHaveBeenCalledTimes(1);
+    expect(head.job).toMatchObject({ state: "succeeded", result: { phase: "head", pages: HEAD_PAGES_PER_RUN, records: 6 } });
+    expect((head.job.result as { bytes: number }).bytes).toBeGreaterThan(0);
 
     const firstRequest = github.requests[0];
     expect(firstRequest.pathname).toBe("/repos/alice/extract/issues");
     expect(Object.fromEntries(firstRequest.searchParams)).toMatchObject({
       state: "all",
       sort: "updated",
-      direction: "asc",
+      direction: "desc",
       per_page: "100",
     });
     expect(firstRequest.searchParams.has("since")).toBe(false);
 
-    // The page budget was hit: the cursor points at page 6 and a continuation job was enqueued.
-    const checkpoint = await getCheckpoint(db, REPO_ID, "issues");
-    expect(checkpoint?.cursor).toContain("page=6");
-    expect(checkpoint?.last_item_at).toBeNull();
-    expect(first.queue.send).toHaveBeenCalledTimes(2); // the first job and its continuation
-    const continuation = first.queue.send.mock.calls[1][0];
+    // The head is complete: the high-water mark comes from what it saw, the cursor marks
+    // page 3 for the backfill, and the transform plus a delayed backfill job were queued.
+    const afterHead = await getCheckpoint(db, REPO_ID, "issues");
+    expect(afterHead).toMatchObject({ head_done_at: expect.any(String), backfill_done_at: null, last_synced_at: expect.any(String), pages_fetched: 2, items_fetched: 6 });
+    expect(afterHead?.cursor).toContain("page=3");
+    expect(afterHead?.last_item_at && Date.parse(afterHead.last_item_at)).toBe(Date.parse(updatedAt(6)));
+    const sends = () => head.queue.send.mock.calls.map(([m, o]) => [m.kind, o?.delaySeconds ?? 0]);
+    expect(sends()).toEqual([
+      ["fetch_issues", 0],
+      ["transform_passages", 0],
+      ["backfill_issues", BACKFILL_DELAY_SECONDS],
+    ]);
+    const backfill = head.queue.send.mock.calls[2][0];
+    expect(backfill).toMatchObject({ repoId: REPO_ID, kind: "backfill_issues", generation: 1 });
+
+    // The backfill takes its page budget and yields with a delayed continuation of itself;
+    // the transform it would queue is still waiting, so nothing else is sent.
+    const first = await runJobOfKind("backfill_issues", github, head.queue, backfill.jobId);
+    expect(first.job).toMatchObject({ state: "succeeded", result: { phase: "backfill", pages: BACKFILL_PAGES_PER_RUN, records: 9 } });
+    expect(github.requests.slice(2).map((u) => u.searchParams.get("page"))).toEqual(["3", "4", "5"]);
+    expect((await getCheckpoint(db, REPO_ID, "issues"))?.cursor).toContain("page=6");
+    expect(sends().slice(3)).toEqual([["backfill_issues", BACKFILL_DELAY_SECONDS]]);
+    const continuation = head.queue.send.mock.calls[3][0];
     expect(continuation.jobId).not.toBe(first.job.id);
-    expect(continuation).toMatchObject({ repoId: REPO_ID, kind: "fetch_issues", generation: 1 });
 
-    const second = await runJobOfKind("fetch_issues", github, first.queue, continuation.jobId);
-    expect(second.job).toMatchObject({ state: "succeeded", result: { pages: 2, records: 6 } });
+    const second = await runJobOfKind("backfill_issues", github, head.queue, continuation.jobId);
+    expect(second.job).toMatchObject({ state: "succeeded", result: { phase: "backfill", pages: 2, records: 6 } });
     expect(github.requests.at(-2)?.searchParams.get("page")).toBe("6");
-    // No further continuation; the finished listing queues the transform instead.
-    expect(first.queue.send).toHaveBeenCalledTimes(3);
-    expect(first.queue.send.mock.calls[2][0]).toMatchObject({ repoId: REPO_ID, kind: "transform_passages" });
+    expect(head.queue.send).toHaveBeenCalledTimes(4); // no continuation, and the transform is still queued
 
+    // The listing is complete; the backfill never moved the high-water mark.
     const done = await getCheckpoint(db, REPO_ID, "issues");
-    expect(done?.cursor).toBeNull();
-    expect(done?.last_item_at && Date.parse(done.last_item_at)).toBe(Date.parse(updatedAt(21)));
+    expect(done).toMatchObject({ cursor: null, backfill_done_at: expect.any(String), pages_fetched: 7, items_fetched: 21 });
+    expect(done?.last_item_at && Date.parse(done.last_item_at)).toBe(Date.parse(updatedAt(6)));
 
     const sources = await listSources(db, REPO_ID);
     expect(sources).toHaveLength(21);
@@ -112,7 +127,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
       state: "closed",
       html_url: "https://github.com/alice/extract/pull/4",
       api_url: `${API}/pulls/4`,
-      fetched_by_job: first.job.id,
+      fetched_by_job: head.job.id,
     });
     expect(sources.find((s) => s.number === 21)?.fetched_by_job).toBe(second.job.id);
   });
@@ -143,23 +158,27 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
     expect(unknownRepo.status).toBe(404);
   });
 
-  it("passes the high-water mark as since and never overwrites newer stored data with a stale page", async () => {
+  it("syncs ascending since the high-water mark and never overwrites newer stored data with a stale page", async () => {
     const github = fakeGitHub([
       [
         issue(5, { title: "Issue 5 renamed", updated_at: updatedAt(21, 1) }),
         issue(7, { title: "stale copy", updated_at: updatedAt(7, -1) }),
       ],
     ]);
-    const { job } = await runJobOfKind("fetch_issues", github);
+    const { job, queue } = await runJobOfKind("fetch_issues", github);
 
-    expect(job).toMatchObject({ state: "succeeded", result: { pages: 1, records: 2 } });
-    expect(github.requests[0].searchParams.get("since")).toBe(updatedAt(21));
+    expect(job).toMatchObject({ state: "succeeded", result: { phase: "sync", pages: 1, records: 2 } });
+    expect(github.requests[0].searchParams.get("since")).toBe(updatedAt(6));
+    expect(github.requests[0].searchParams.get("direction")).toBe("asc");
+    // No continuation and no backfill; the transform queued by the earlier runs is still waiting.
+    expect(queue.send.mock.calls.map(([m]) => m.kind)).toEqual(["fetch_issues"]);
 
     const sources = await listSources(db, REPO_ID);
     expect(sources.find((s) => s.number === 5)?.title).toBe("Issue 5 renamed");
     expect(sources.find((s) => s.number === 7)?.title).toBe("Issue 7");
     const checkpoint = await getCheckpoint(db, REPO_ID, "issues");
     expect(checkpoint?.last_item_at && Date.parse(checkpoint.last_item_at)).toBe(Date.parse(updatedAt(21, 1)));
+    expect(checkpoint).toMatchObject({ sync_cursor: null, last_synced_at: expect.any(String) });
   });
 
   it("fails permanently when the repository is gone", async () => {

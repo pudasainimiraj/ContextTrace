@@ -39,13 +39,13 @@ function fakeQueue() {
   return { send: vi.fn<JobQueue["send"]>(async () => {}) };
 }
 
-/** Creates and enqueues a job, or re-delivers an existing one, then consumes it. */
+/** Creates and enqueues a fetch_issues job, or re-delivers an existing job, then consumes it. */
 async function runJob(github: FakeGitHub, existing?: { id: number; queue: ReturnType<typeof fakeQueue> }) {
   const queue = existing?.queue ?? fakeQueue();
   const id = existing?.id ?? (await createJob(db, REPO_ID, "fetch_issues")).id;
   if (!existing) await enqueueJob(db, queue, id);
   const current = (await getJob(db, id))!;
-  const message = fakeMessage({ jobId: id, repoId: REPO_ID, kind: "fetch_issues", generation: current.generation });
+  const message = fakeMessage({ jobId: id, repoId: REPO_ID, kind: current.kind, generation: current.generation });
   await consumeJobMessage({ db, queue, fetch: github.fetch }, message, "worker-a");
   return { job: (await getJob(db, id))!, message, queue };
 }
@@ -63,29 +63,36 @@ afterAll(async () => {
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("throttling", () => {
   it("stops paging when the rate limit is nearly exhausted and resumes from the cursor after the reset", async () => {
-    const reset = Math.floor(Date.now() / 1000) + 30;
+    let reset = 0;
     const pages = [1, 2, 3, 4].map((p) => [issue(p * 2 - 1), issue(p * 2)]);
     const github = fakeGitHubPages(pages, undefined, (page): Record<string, string> =>
-      page === 2 ? { "X-RateLimit-Remaining": String(RATE_LIMIT_RESERVE - 1), "X-RateLimit-Reset": String(reset) } : {},
+      page === 3 ? { "X-RateLimit-Remaining": String(RATE_LIMIT_RESERVE - 1), "X-RateLimit-Reset": String(reset) } : {},
     );
 
-    const first = await runJob(github);
+    // The head pass takes its two pages and hands page 3 onwards to a backfill job.
+    const head = await runJob(github);
+    expect(head.job).toMatchObject({ state: "succeeded", result: { phase: "head", pages: 2, records: 4 } });
+    const backfillId = head.queue.send.mock.calls.find(([m]) => m.kind === "backfill_issues")![0].jobId;
+
+    // The reset lies 30 s ahead of the backfill run, beyond the first attempt's 30 s backoff floor.
+    reset = Math.floor(Date.now() / 1000) + 30;
+    const first = await runJob(github, { id: backfillId, queue: head.queue });
     expect(first.job).toMatchObject({ state: "retry_pending", error_code: "rate_limited", attempt: 1 });
-    expect(github.requests).toHaveLength(2);
-    expect(await listSources(db, REPO_ID)).toHaveLength(4);
-    expect((await getCheckpoint(db, REPO_ID, "issues"))?.cursor).toContain("page=3");
+    expect(github.requests).toHaveLength(3);
+    expect(await listSources(db, REPO_ID)).toHaveLength(6);
+    expect((await getCheckpoint(db, REPO_ID, "issues"))?.cursor).toContain("page=4");
     const wait = Date.parse(first.job.next_attempt_at!) / 1000 - reset;
     expect(wait).toBeGreaterThanOrEqual(0);
     expect(wait).toBeLessThanOrEqual(3);
     expect(delayOfLastSend(first.queue)).toBeGreaterThanOrEqual(30);
 
-    // Once due, the same job resumes from page 3 and finishes the listing.
+    // Once due, the same job resumes from page 4 and finishes the listing.
     await db.from("jobs").update({ next_attempt_at: new Date(Date.now() - 1000).toISOString() }).eq("id", first.job.id);
     const second = await runJob(github, { id: first.job.id, queue: first.queue });
-    expect(second.job).toMatchObject({ state: "succeeded", attempt: 2, result: { pages: 2, records: 4 } });
+    expect(second.job).toMatchObject({ state: "succeeded", attempt: 2, result: { phase: "backfill", pages: 1, records: 2 } });
     expect(github.requests.map((u) => u.searchParams.get("page") ?? "1")).toEqual(["1", "2", "3", "4"]);
     expect(await listSources(db, REPO_ID)).toHaveLength(8);
-    expect((await getCheckpoint(db, REPO_ID, "issues"))?.cursor).toBeNull();
+    expect(await getCheckpoint(db, REPO_ID, "issues")).toMatchObject({ cursor: null, backfill_done_at: expect.any(String) });
   });
 
   it("honours Retry-After on a 429 and the rate-reset time on a 403", async () => {

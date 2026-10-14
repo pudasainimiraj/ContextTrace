@@ -122,6 +122,7 @@ export async function ensureQueuedJob(
   queue: JobQueue,
   repositoryId: number,
   kind: string,
+  options: { delaySeconds?: number } = {},
 ): Promise<JobRecord | null> {
   const { data, error } = await db
     .from("jobs")
@@ -133,5 +134,5 @@ export async function ensureQueuedJob(
   if (error) throw new Error(`select jobs failed: ${error.message}`);
   if (data && data.length > 0) return null;
   const job = await createJob(db, repositoryId, kind);
-  return enqueueJob(db, queue, job.id);
+  return enqueueJob(db, queue, job.id, options);
 }

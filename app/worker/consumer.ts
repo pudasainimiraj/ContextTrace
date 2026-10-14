@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
 import { EMBED_JOB_KIND, embedPassages } from "./embed.ts";
 import type { EmbeddingClient } from "./embeddings.ts";
-import { extractStream, STREAMS } from "./extract.ts";
+import { BACKFILL_DELAY_SECONDS, backfillKind, extractStream, STREAM_KINDS } from "./extract.ts";
 import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
 import { nextJobKind } from "./pipeline.ts";
 import { getRepository } from "./repositories.ts";
@@ -16,8 +16,11 @@ export type JobContext = {
   embeddings?: EmbeddingClient;
 };
 
+/** A job kind to queue after a run, unless one is already waiting; delayed for low-priority work. */
+export type FollowUp = { kind: string; delaySeconds?: number };
+
 /** What one run achieved; `done: false` asks for a continuation job of the same kind. */
-export type RunResult = { done: boolean; result?: Record<string, unknown> };
+export type RunResult = { done: boolean; result?: Record<string, unknown>; followUps?: FollowUp[] };
 export type JobRunner = (job: JobRecord, ctx: JobContext) => Promise<RunResult>;
 
 export type ConsumerContext = JobContext & { queue: JobQueue; run?: JobRunner };
@@ -38,15 +41,21 @@ const RUNNERS: Record<string, JobRunner> = {
 export const runJob: JobRunner = async (job, ctx) => {
   const runner = RUNNERS[job.kind];
   if (runner) return runner(job, ctx);
-  const spec = STREAMS[job.kind];
-  if (!spec) throw new JobError("unknown_kind", `No extractor for job kind "${job.kind}"`, { transient: false });
+  const stream = STREAM_KINDS[job.kind];
+  if (!stream) throw new JobError("unknown_kind", `No extractor for job kind "${job.kind}"`, { transient: false });
   const repository = await getRepository(ctx.db, job.repository_id);
   if (!repository) {
     throw new JobError("repository_missing", `Repository ${job.repository_id} is not registered`, { transient: false });
   }
-  const { done, ...result } = await extractStream(ctx, spec, repository, job.id);
-  return { done, result };
+  const { done, backfillPending, ...result } = await extractStream(ctx, stream.spec, repository, job.id, stream.role);
+  const followUps: FollowUp[] = backfillPending ? [{ kind: backfillKind(stream.spec.stream), delaySeconds: BACKFILL_DELAY_SECONDS }] : [];
+  return { done, result, followUps };
 };
+
+/** How long a continuation of this kind waits before delivery: backfill runs yield to other work. */
+export function continuationDelaySeconds(kind: string): number {
+  return STREAM_KINDS[kind]?.role === "backfill" ? BACKFILL_DELAY_SECONDS : 0;
+}
 
 /**
  * Handles one delivered queue message.
@@ -55,8 +64,10 @@ export const runJob: JobRunner = async (job, ctx) => {
  *   the message is acked without work. A retry_pending job that is not yet due asks
  *   the queue to redeliver when its backoff ends.
  * - A claimed job runs and is finished by its lease holder with its result. A run that
- *   stopped at its page budget gets a continuation job of the same kind; a finished run
- *   queues the job kind that follows it, unless one is already waiting.
+ *   stopped at its page budget gets a continuation job of the same kind, delayed for
+ *   low-priority kinds. Every successful run queues the job kind that follows it and the
+ *   follow-ups it asked for, unless one of that kind is already waiting, so coverage
+ *   grows after each run and not only at the end of a listing.
  * - A transient error parks the job as retry_pending with exponential backoff and
  *   re-enqueues it with a matching delay. A permanent error, or a transient one past
  *   MAX_ATTEMPTS, fails the job. The message is acked in every case.
@@ -93,10 +104,9 @@ export async function consumeJobMessage(
     await finishJob(ctx.db, job.id, owner, { state: "succeeded", result });
     if (!outcome.done) {
       const next = await createJob(ctx.db, job.repository_id, job.kind);
-      await enqueueJob(ctx.db, ctx.queue, next.id);
-    } else {
-      await queueFollowUp(ctx, job);
+      await enqueueJob(ctx.db, ctx.queue, next.id, { delaySeconds: continuationDelaySeconds(job.kind) });
     }
+    await queueFollowUps(ctx, job, outcome.followUps ?? []);
   } catch (err) {
     const failure = classifyError(err);
     if (failure.transient && job.attempt < MAX_ATTEMPTS) {
@@ -119,14 +129,15 @@ export async function consumeJobMessage(
   message.ack();
 }
 
-/** Queues the job kind that follows a finished job; a failure here never undoes the finished run. */
-async function queueFollowUp(ctx: ConsumerContext, job: JobRecord): Promise<void> {
+/** Queues the job kind that follows a run and the run's own follow-ups; a failure here never undoes the run. */
+async function queueFollowUps(ctx: ConsumerContext, job: JobRecord, followUps: FollowUp[]): Promise<void> {
   const next = nextJobKind(job.kind);
-  if (!next) return;
-  try {
-    await ensureQueuedJob(ctx.db, ctx.queue, job.repository_id, next);
-  } catch (err) {
-    console.error(`could not queue ${next} after job ${job.id}`, err);
+  for (const followUp of [...(next ? [{ kind: next }] : []), ...followUps]) {
+    try {
+      await ensureQueuedJob(ctx.db, ctx.queue, job.repository_id, followUp.kind, { delaySeconds: followUp.delaySeconds });
+    } catch (err) {
+      console.error(`could not queue ${followUp.kind} after job ${job.id}`, err);
+    }
   }
 }
 

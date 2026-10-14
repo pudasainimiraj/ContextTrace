@@ -1,5 +1,6 @@
 import type { ApiError, SourceType } from "../shared/api.ts";
 import { consumeJobMessage } from "./consumer.ts";
+import { getCoverage } from "./coverage.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage } from "./jobs.ts";
@@ -35,6 +36,9 @@ export default {
 
     const statsOf = /^\/api\/repositories\/(\d+)\/embeddings\/stats$/.exec(pathname);
     if (method === "GET" && statsOf) return getEmbeddingStats(env, Number(statsOf[1]));
+
+    const coverageOf = /^\/api\/repositories\/(\d+)\/coverage$/.exec(pathname);
+    if (method === "GET" && coverageOf) return getRepositoryCoverage(env, Number(coverageOf[1]));
 
     return error(404, "not_found", "No such route");
   },
@@ -164,6 +168,14 @@ async function searchRepository(request: Request, env: Env): Promise<Response> {
 
 function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** GET /api/repositories/:id/coverage -> counts, stream progress, high-water marks and sync times */
+async function getRepositoryCoverage(env: Env, repositoryId: number): Promise<Response> {
+  const db = createDb(env);
+  const repository = await getRepository(db, repositoryId);
+  if (!repository) return error(404, "not_found", "Repository is not registered");
+  return json(await getCoverage(db, repository));
 }
 
 /** GET /api/repositories/:id */

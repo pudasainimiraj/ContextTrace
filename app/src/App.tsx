@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import type { ApiError, EvidenceCard, RepositoryRecord, SearchResponse } from "../shared/api.ts";
+import { useEffect, useState, type FormEvent } from "react";
+import type { ApiError, CoverageReport, EvidenceCard, RepositoryRecord, SearchResponse, StreamCoverage } from "../shared/api.ts";
 import "./App.css";
 
 type Phase =
@@ -58,6 +58,7 @@ function App() {
       {phase.kind === "done" && (
         <>
           <RepositoryStatus repo={phase.repo} created={phase.created} />
+          <CoveragePanel repositoryId={phase.repo.id} />
           <SearchPanel repositoryId={phase.repo.id} />
         </>
       )}
@@ -87,6 +88,120 @@ function RepositoryStatus({ repo, created }: { repo: RepositoryRecord; created: 
       </dl>
     </section>
   );
+}
+
+const COVERAGE_POLL_MS = 5000;
+
+/** Live coverage: polls while the repository is still being indexed, then once more and stops. */
+function CoveragePanel({ repositoryId }: { repositoryId: number }) {
+  const [coverage, setCoverage] = useState<CoverageReport | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      try {
+        const res = await fetch(`/api/repositories/${repositoryId}/coverage`);
+        const body = (await res.json()) as CoverageReport | ApiError;
+        if (!active) return;
+        if (!res.ok) {
+          setFailure("error" in body ? body.message : `Request failed (${res.status})`);
+          return;
+        }
+        const report = body as CoverageReport;
+        setCoverage(report);
+        setFailure(null);
+        if (report.status !== "searchable" && report.status !== "inaccessible") timer = setTimeout(poll, COVERAGE_POLL_MS);
+      } catch (err) {
+        if (active) setFailure(err instanceof Error ? err.message : String(err));
+      }
+    }
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [repositoryId]);
+
+  if (failure) return <p className="error">Coverage unavailable: {failure}</p>;
+  if (!coverage) return <p className="meta">Loading coverage…</p>;
+
+  const activeJobs = coverage.jobs.queued + coverage.jobs.running + coverage.jobs.retry_pending;
+  return (
+    <section className="coverage" aria-label="Coverage">
+      <p className="badge">
+        {STATUS_LABEL[coverage.status]}
+        {activeJobs > 0 ? ` · ${activeJobs} job${activeJobs === 1 ? "" : "s"} in flight` : ""}
+        {coverage.jobs.failed > 0 ? ` · ${coverage.jobs.failed} failed` : ""}
+      </p>
+      <dl>
+        <dt>Issues / pull requests</dt>
+        <dd>
+          {coverage.sources.issue} / {coverage.sources.pull_request}
+        </dd>
+        <dt>Comments / review comments</dt>
+        <dd>
+          {coverage.sources.issue_comment} / {coverage.sources.review_comment}
+        </dd>
+        <dt>Passages searchable</dt>
+        <dd>
+          {coverage.embedded} of {coverage.passages}
+          {coverage.pending > 0 ? ` (${coverage.pending} waiting for a vector)` : ""}
+        </dd>
+        <dt>Complete source types</dt>
+        <dd>{coverage.completed_source_types.length > 0 ? coverage.completed_source_types.join(", ") : "none yet"}</dd>
+        <dt>Last successful sync</dt>
+        <dd>{coverage.last_successful_sync_at ? formatTime(coverage.last_successful_sync_at) : "not yet"}</dd>
+      </dl>
+      <table className="streams">
+        <thead>
+          <tr>
+            <th>Stream</th>
+            <th>Phase</th>
+            <th>Items</th>
+            <th>High-water mark</th>
+            <th>Last sync</th>
+          </tr>
+        </thead>
+        <tbody>
+          {coverage.streams.map((s) => (
+            <StreamRow key={s.stream} stream={s} />
+          ))}
+        </tbody>
+      </table>
+      {coverage.last_error && (
+        <p role="alert" className="error">
+          {coverage.last_error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+const STATUS_LABEL: Record<CoverageReport["status"], string> = {
+  registered: "Registered, not searchable yet",
+  searchable_partial: "Searchable, index still growing",
+  searchable: "Searchable, fully indexed",
+  inaccessible: "No longer accessible on GitHub",
+};
+
+function StreamRow({ stream }: { stream: StreamCoverage }) {
+  const phase =
+    stream.phase === "backfill" ? (stream.backfill_pending ? "backfilling history" : "backfill") : stream.phase === "head" ? "newest pages" : stream.phase;
+  return (
+    <tr>
+      <td>{stream.stream.replace("_", " ")}</td>
+      <td>{phase}</td>
+      <td>{stream.items_fetched}</td>
+      <td>{stream.high_water_mark ? formatTime(stream.high_water_mark) : "—"}</td>
+      <td>{stream.last_synced_at ? formatTime(stream.last_synced_at) : "—"}</td>
+    </tr>
+  );
+}
+
+function formatTime(iso: string): string {
+  return iso.replace("T", " ").slice(0, 16) + " UTC";
 }
 
 type SearchPhase =
