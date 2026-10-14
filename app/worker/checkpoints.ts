@@ -15,6 +15,8 @@ export type StreamCheckpoint = {
   head_done_at: string | null;
   backfill_done_at: string | null;
   last_synced_at: string | null;
+  rescan_started_at: string | null; // a rescan is walking the listing from the start
+  last_rescan_at: string | null;
   pages_fetched: number;
   items_fetched: number;
   job_id: number | null;

@@ -37,6 +37,9 @@ const fakeGitHub = vi.fn<typeof globalThis.fetch>(async (input) => {
         { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(Math.floor(Date.now() / 1000) + 30) },
       );
     default:
+      // Extraction jobs that the local queue runs against this stub list nothing; only an
+      // unknown repository lookup is a 404.
+      if (/\/(issues|issues\/comments|pulls\/comments)$/.test(new URL(hrefOf(input)).pathname)) return jsonResponse(200, []);
       return jsonResponse(404, { message: "Not Found" });
   }
 });
@@ -110,6 +113,20 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     // Registration started one extraction job per stream, once.
     const { data: jobs } = await createDb(env).from("jobs").select("kind").eq("repository_id", ID_DAGSTER).order("kind");
     expect(jobs?.map((j) => j.kind)).toEqual(["fetch_issue_comments", "fetch_issues", "fetch_review_comments"]);
+  });
+
+  it("reinstates a repository that GitHub serves again and catches up through its streams", async () => {
+    const db = createDb(env);
+    await post("https://github.com/dagster-io/dagster");
+    await db.from("repositories").update({ status: "inaccessible", last_error: "not_found: Not Found" }).eq("id", ID_DAGSTER);
+    const fetchJobs = async () =>
+      (await db.from("jobs").select("id", { count: "exact", head: true }).eq("repository_id", ID_DAGSTER).like("kind", "fetch_%")).count ?? 0;
+    const jobsBefore = await fetchJobs();
+
+    const res = await post("https://github.com/dagster-io/dagster");
+    expect(res.status).toBe(200);
+    expect((await res.json()) as RepositoryRecord).toMatchObject({ id: ID_DAGSTER, status: "registered", last_error: null });
+    expect((await fetchJobs()) - jobsBefore).toBe(3); // one fetch job per stream, as at registration
   });
 
   it("creates and enqueues a job for a registered repository", async () => {

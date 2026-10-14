@@ -4,7 +4,7 @@ import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
 import { BACKFILL_DELAY_SECONDS, BACKFILL_PAGES_PER_RUN, type GitHubIssue, HEAD_PAGES_PER_RUN, overlapSince, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
-import { createDb, upsertRepository } from "../worker/repositories.ts";
+import { createDb, getRepository, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
 import type { SourceRecord } from "../shared/api.ts";
 import { type FakeGitHub, fakeGitHubPages, fakeMessage, jsonResponse, repoFixture } from "./helpers.ts";
@@ -181,11 +181,13 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
     expect(checkpoint).toMatchObject({ sync_cursor: null, last_synced_at: expect.any(String) });
   });
 
-  it("fails permanently when the repository is gone", async () => {
+  it("fails permanently when the repository is gone, and marks the repository inaccessible", async () => {
     const github = fakeGitHub([], () => jsonResponse(404, { message: "Not Found" }));
     const { job, queue } = await runJobOfKind("fetch_issues", github);
     expect(job).toMatchObject({ state: "failed", error_code: "not_found" });
     expect(queue.send).toHaveBeenCalledTimes(1); // only the original enqueue
+    expect(await getRepository(db, REPO_ID)).toMatchObject({ status: "inaccessible", last_error: "not_found: Not Found" });
+    await db.from("repositories").update({ status: "registered", last_error: null }).eq("id", REPO_ID);
   });
 
   it("parks the job until the rate limit resets", async () => {

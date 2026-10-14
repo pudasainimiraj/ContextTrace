@@ -31,10 +31,11 @@ afterAll(async () => {
 describe("streamCoverage", () => {
   it("derives the phase from the checkpoint", () => {
     expect(streamCoverage("issues", undefined)).toMatchObject({ phase: "pending", complete: false, source_types: ["issue", "pull_request"], items_fetched: 0 });
-    const base = { repository_id: REPO, stream: "issues", cursor: null, sync_cursor: null, last_item_at: null, head_done_at: null, backfill_done_at: null, last_synced_at: null, pages_fetched: 1, items_fetched: 9, job_id: null, updated_at: T0 };
+    const base = { repository_id: REPO, stream: "issues", cursor: null, sync_cursor: null, last_item_at: null, head_done_at: null, backfill_done_at: null, last_synced_at: null, rescan_started_at: null, last_rescan_at: null, pages_fetched: 1, items_fetched: 9, job_id: null, updated_at: T0 };
     expect(streamCoverage("issues", base)).toMatchObject({ phase: "head", complete: false });
     expect(streamCoverage("issues", { ...base, head_done_at: T0, cursor: "https://api.github.com/x?page=3" })).toMatchObject({ phase: "backfill", backfill_pending: true });
     expect(streamCoverage("issues", { ...base, head_done_at: T0, backfill_done_at: T1, sync_cursor: "https://api.github.com/x?page=2" })).toMatchObject({ phase: "complete", complete: true, backfill_pending: false, sync_in_progress: true });
+    expect(streamCoverage("issues", { ...base, head_done_at: T0, backfill_done_at: T1, cursor: "https://api.github.com/x?page=2", rescan_started_at: T1 })).toMatchObject({ phase: "rescan", complete: true, backfill_pending: false, rescan_in_progress: true });
   });
 });
 
@@ -89,9 +90,9 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository coverage", () => {
       jobs: { queued: 1, running: 0, retry_pending: 0, failed: 0 },
     });
     expect(report.streams).toEqual([
-      { stream: "issues", source_types: ["issue", "pull_request"], phase: "complete", complete: true, high_water_mark: T1, last_synced_at: T2, backfill_done_at: T1, backfill_pending: false, sync_in_progress: false, pages_fetched: 3, items_fetched: 2 },
-      { stream: "issue_comments", source_types: ["issue_comment"], phase: "backfill", complete: false, high_water_mark: T0, last_synced_at: T0, backfill_done_at: null, backfill_pending: true, sync_in_progress: false, pages_fetched: 2, items_fetched: 1 },
-      { stream: "review_comments", source_types: ["review_comment"], phase: "pending", complete: false, high_water_mark: null, last_synced_at: null, backfill_done_at: null, backfill_pending: false, sync_in_progress: false, pages_fetched: 0, items_fetched: 0 },
+      { stream: "issues", source_types: ["issue", "pull_request"], phase: "complete", complete: true, high_water_mark: T1, last_synced_at: T2, backfill_done_at: T1, backfill_pending: false, sync_in_progress: false, rescan_in_progress: false, last_rescan_at: null, pages_fetched: 3, items_fetched: 2 },
+      { stream: "issue_comments", source_types: ["issue_comment"], phase: "backfill", complete: false, high_water_mark: T0, last_synced_at: T0, backfill_done_at: null, backfill_pending: true, sync_in_progress: false, rescan_in_progress: false, last_rescan_at: null, pages_fetched: 2, items_fetched: 1 },
+      { stream: "review_comments", source_types: ["review_comment"], phase: "pending", complete: false, high_water_mark: null, last_synced_at: null, backfill_done_at: null, backfill_pending: false, sync_in_progress: false, rescan_in_progress: false, last_rescan_at: null, pages_fetched: 0, items_fetched: 0 },
     ]);
   });
 

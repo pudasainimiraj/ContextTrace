@@ -1,13 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CoverageReport, RepositoryRecord, SourceType, StreamCoverage, StreamPhase } from "../shared/api.ts";
 import type { StreamCheckpoint } from "./checkpoints.ts";
+import { STREAM_SOURCE_TYPES } from "./extract.ts";
 
-/** The streams a repository is covered by, and the source types each one stores. */
-export const STREAM_SOURCE_TYPES: Record<string, SourceType[]> = {
-  issues: ["issue", "pull_request"],
-  issue_comments: ["issue_comment"],
-  review_comments: ["review_comment"],
-};
 const SOURCE_TYPES: SourceType[] = ["issue", "pull_request", "issue_comment", "review_comment"];
 const JOB_STATES = ["queued", "running", "retry_pending", "failed"] as const;
 
@@ -48,17 +43,27 @@ export async function getCoverage(db: SupabaseClient, repository: RepositoryReco
 }
 
 export function streamCoverage(stream: string, checkpoint: StreamCheckpoint | undefined): StreamCoverage {
-  const phase: StreamPhase = !checkpoint ? "pending" : !checkpoint.head_done_at ? "head" : !checkpoint.backfill_done_at ? "backfill" : "complete";
+  const phase: StreamPhase = !checkpoint
+    ? "pending"
+    : !checkpoint.head_done_at
+      ? "head"
+      : !checkpoint.backfill_done_at
+        ? "backfill"
+        : checkpoint.rescan_started_at
+          ? "rescan"
+          : "complete";
   return {
     stream,
     source_types: STREAM_SOURCE_TYPES[stream] ?? [],
     phase,
-    complete: phase === "complete",
+    complete: Boolean(checkpoint?.backfill_done_at),
     high_water_mark: checkpoint?.last_item_at ?? null,
     last_synced_at: checkpoint?.last_synced_at ?? null,
     backfill_done_at: checkpoint?.backfill_done_at ?? null,
     backfill_pending: Boolean(checkpoint?.cursor) && !checkpoint?.backfill_done_at,
     sync_in_progress: Boolean(checkpoint?.sync_cursor),
+    rescan_in_progress: Boolean(checkpoint?.rescan_started_at),
+    last_rescan_at: checkpoint?.last_rescan_at ?? null,
     pages_fetched: checkpoint?.pages_fetched ?? 0,
     items_fetched: checkpoint?.items_fetched ?? 0,
   };

@@ -2,10 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
 import { EMBED_JOB_KIND, embedPassages } from "./embed.ts";
 import type { EmbeddingClient } from "./embeddings.ts";
-import { BACKFILL_DELAY_SECONDS, backfillKind, extractStream, STREAM_KINDS } from "./extract.ts";
+import { BACKFILL_DELAY_SECONDS, extractStream, STREAM_KINDS } from "./extract.ts";
 import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
 import { nextJobKind } from "./pipeline.ts";
-import { getRepository } from "./repositories.ts";
+import { getRepository, markRepositoryInaccessible } from "./repositories.ts";
 import { backoffSeconds, classifyError, JobError, MAX_ATTEMPTS } from "./retry.ts";
 import { TRANSFORM_JOB_KIND, transformRepository } from "./transform.ts";
 
@@ -47,14 +47,26 @@ export const runJob: JobRunner = async (job, ctx) => {
   if (!repository) {
     throw new JobError("repository_missing", `Repository ${job.repository_id} is not registered`, { transient: false });
   }
-  const { done, backfillPending, ...result } = await extractStream(ctx, stream.spec, repository, job.id, stream.role);
-  const followUps: FollowUp[] = backfillPending ? [{ kind: backfillKind(stream.spec.stream), delaySeconds: BACKFILL_DELAY_SECONDS }] : [];
+  let extracted;
+  try {
+    extracted = await extractStream(ctx, stream.spec, repository, job.id, stream.role);
+  } catch (err) {
+    // GitHub no longer serves the repository (deleted, made private, access revoked): say so
+    // on the repository, so syncs stop and searches warn, then fail the job as before.
+    if (err instanceof JobError && (err.code === "not_found" || err.code === "forbidden")) {
+      await markRepositoryInaccessible(ctx.db, repository.id, `${err.code}: ${err.message}`);
+    }
+    throw err;
+  }
+  const { done, followUpKind, ...result } = extracted;
+  const followUps: FollowUp[] = followUpKind ? [{ kind: followUpKind, delaySeconds: BACKFILL_DELAY_SECONDS }] : [];
   return { done, result, followUps };
 };
 
-/** How long a continuation of this kind waits before delivery: backfill runs yield to other work. */
+/** How long a continuation of this kind waits before delivery: backfill and rescan runs yield to other work. */
 export function continuationDelaySeconds(kind: string): number {
-  return STREAM_KINDS[kind]?.role === "backfill" ? BACKFILL_DELAY_SECONDS : 0;
+  const role = STREAM_KINDS[kind]?.role;
+  return role === "backfill" || role === "rescan" ? BACKFILL_DELAY_SECONDS : 0;
 }
 
 /**
