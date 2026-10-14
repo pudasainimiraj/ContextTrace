@@ -114,6 +114,7 @@ export async function consumeJobMessage(
     // Wall time of the run as the Worker sees it (the clock only advances across I/O).
     const result = { ...outcome.result, durationMs: Date.now() - startedAt };
     await finishJob(ctx.db, job.id, owner, { state: "succeeded", result });
+    console.log("job succeeded", { id: job.id, kind: job.kind, repositoryId: job.repository_id, attempt: job.attempt, durationMs: result.durationMs });
     if (!outcome.done) {
       const next = await createJob(ctx.db, job.repository_id, job.kind);
       await enqueueJob(ctx.db, ctx.queue, next.id, { delaySeconds: continuationDelaySeconds(job.kind) });
@@ -121,6 +122,7 @@ export async function consumeJobMessage(
     await queueFollowUps(ctx, job, outcome.followUps ?? []);
   } catch (err) {
     const failure = classifyError(err);
+    console.log("job failed", { id: job.id, kind: job.kind, repositoryId: job.repository_id, attempt: job.attempt, code: failure.code, transient: failure.transient });
     if (failure.transient && job.attempt < MAX_ATTEMPTS) {
       const delaySeconds = backoffSeconds(job.attempt, failure.retryAfterSeconds);
       const parked = await finishJob(ctx.db, job.id, owner, {
