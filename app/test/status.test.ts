@@ -82,13 +82,14 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository status", () => {
     expect(await embed(2, 1)).toMatchObject({ done: true, inserted: 1 });
     expect((await status()).status).toBe("searchable_partial"); // no stream has completed its listing
 
+    const done = new Date().toISOString();
     for (const stream of STREAMS.slice(0, 2)) {
-      await saveCheckpoint(db, { repository_id: REPO, stream, cursor: null, last_item_at: null, job_id: null });
+      await saveCheckpoint(db, { repository_id: REPO, stream, cursor: null, head_done_at: done, backfill_done_at: done });
     }
-    await saveCheckpoint(db, { repository_id: REPO, stream: STREAMS[2], cursor: "https://api.github.com/page=2", last_item_at: null, job_id: null });
+    await saveCheckpoint(db, { repository_id: REPO, stream: STREAMS[2], cursor: "https://api.github.com/page=2", head_done_at: done, backfill_done_at: null });
     expect(await refreshRepositoryStatus(db, REPO, TRANSFORM_VERSION)).toBe("searchable_partial");
 
-    await saveCheckpoint(db, { repository_id: REPO, stream: STREAMS[2], cursor: null, last_item_at: null, job_id: null });
+    await saveCheckpoint(db, { repository_id: REPO, stream: STREAMS[2], cursor: null, backfill_done_at: done });
     expect(await refreshRepositoryStatus(db, REPO, TRANSFORM_VERSION)).toBe("searchable");
     const response = await searchFor(TEXTS[1]);
     expect(response.index).toEqual({ status: "searchable", partial: false, embedded: 3, pending: 0, warning: null });

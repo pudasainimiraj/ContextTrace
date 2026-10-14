@@ -17,7 +17,7 @@
 		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
 	},
 	"triggers": {
-		// Reconciliation sweep: resend messages for expired leases and lost retries.
+		// Reconciliation sweep (expired leases, lost retries) and incremental sync scheduling.
 		"crons": ["*/5 * * * *"]
 	},
 	"queues": {

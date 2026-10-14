@@ -65,7 +65,8 @@ export type SourceRecord = {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
-  fetched_at: string;
+  fetched_at: string; // when the content last changed in a fetch
+  seen_at: string; // when a fetch last returned the record, changed or not
   fetched_by_job: number | null;
 };
 
@@ -156,6 +157,40 @@ export type SearchResponse = {
   index: SearchIndexState;
   results: EvidenceCard[];
   unverified: number; // hits left out because their source link could not be verified
+};
+
+export type StreamPhase = "pending" | "head" | "backfill" | "complete";
+
+/** How far one extraction stream has come. */
+export type StreamCoverage = {
+  stream: string; // issues | issue_comments | review_comments
+  source_types: SourceType[]; // what the stream stores
+  phase: StreamPhase; // pending: not started; head: newest pages; backfill: history; complete: listed to the end
+  complete: boolean;
+  high_water_mark: string | null; // updated_at of the newest item seen; the next sync lists since this
+  last_synced_at: string | null; // last completed head or sync run
+  backfill_done_at: string | null;
+  backfill_pending: boolean; // a backfill cursor is waiting for its job
+  sync_in_progress: boolean; // a sync left a cursor behind
+  pages_fetched: number;
+  items_fetched: number;
+};
+
+/** GET /api/repositories/:id/coverage: what is stored, what is searchable, and how current it is. */
+export type CoverageReport = {
+  repository_id: number;
+  status: RepositoryStatus;
+  partial: boolean;
+  last_error: string | null;
+  sources: Record<SourceType, number>; // stored records per type
+  documents: number;
+  passages: number;
+  embedded: number; // passages with a current vector
+  pending: number; // passages waiting for one
+  streams: StreamCoverage[];
+  completed_source_types: SourceType[]; // types whose stream has been listed to the end
+  last_successful_sync_at: string | null; // every stream had completed a head or sync run by this time
+  jobs: { queued: number; running: number; retry_pending: number; failed: number };
 };
 
 /** Embedding coverage and metering for one repository. */

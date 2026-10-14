@@ -1,29 +1,47 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord } from "../shared/api.ts";
-import { getCheckpoint, saveCheckpoint } from "./checkpoints.ts";
+import { getCheckpoint, saveCheckpoint, type StreamCheckpoint } from "./checkpoints.ts";
 import { GITHUB_API_ROOT, githubGetPage, type GitHubOptions } from "./github-rest.ts";
 import { JobError } from "./retry.ts";
 import { type SourceDraft, upsertSources } from "./sources.ts";
 
-/** Pages fetched per job run before the job yields to a continuation job. */
+/**
+ * Page budgets per job run. A stream's first run is a head pass over the newest items,
+ * short so the repository becomes searchable quickly. The rest of the history is fetched
+ * by backfill runs that take a few pages each and wait BACKFILL_DELAY_SECONDS before the
+ * next, so the head passes and syncs of every other repository on the shared queue get
+ * ahead of them. Syncs list what changed since the high-water mark and take the most.
+ */
+export const HEAD_PAGES_PER_RUN = 2;
+export const BACKFILL_PAGES_PER_RUN = 3;
+export const BACKFILL_DELAY_SECONDS = 10;
 export const MAX_PAGES_PER_RUN = 5;
 export const PER_PAGE = 100;
+/** A sync lists since the high-water mark minus this, so items re-dated or served late around the mark are seen again. */
+export const SYNC_OVERLAP_SECONDS = 300;
 /** Stop paging when fewer requests than this remain before the rate limit resets. */
 export const RATE_LIMIT_RESERVE = 20;
 
 export type RepoRef = { owner: string; name: string };
+export type ListOptions = { since: string | null; direction: "asc" | "desc" };
 
 /** One GitHub list endpoint and how its items become source rows. */
 export type StreamSpec<T> = {
   stream: string; // checkpoint key
-  listUrl: (repo: RepoRef, since: string | null) => string;
+  listUrl: (repo: RepoRef, options: ListOptions) => string;
   toSource: (item: T, repositoryId: number, jobId: number) => SourceDraft;
 };
 
 export type ExtractContext = GitHubOptions & { db: SupabaseClient };
 
+/** fetch_* jobs run the head pass, then syncs; backfill_* jobs continue the descending listing. */
+export type StreamRole = "fetch" | "backfill";
+export type StreamPhase = "head" | "sync" | "backfill";
+
 export type ExtractResult = {
   done: boolean;
+  phase: StreamPhase;
+  backfillPending: boolean; // pages remain for a backfill_* job
   pages: number;
   records: number; // items received from GitHub
   bytes: number; // response bodies received
@@ -34,27 +52,66 @@ export type ExtractResult = {
 };
 
 /**
- * Page-limited, resumable extraction of one stream. Progress lives in the stream's
- * checkpoint: `cursor` is the next page URL while a listing is in progress, and
- * `last_item_at` is the updated_at high-water mark once a listing completes, which
- * becomes the next listing's `since`. A run that hits MAX_PAGES_PER_RUN saves the cursor
- * and reports done: false so the caller can schedule a continuation. A run that is about
- * to exhaust the rate limit saves the cursor and raises a transient rate_limited error
- * timed to the reset, so the same job resumes from the cursor afterwards.
+ * Page-limited, resumable extraction of one stream, in one of three phases decided by
+ * the job's role and the checkpoint:
+ *
+ * - head (fetch_*, no head_done_at): the newest items first, HEAD_PAGES_PER_RUN pages.
+ *   Sets the high-water mark from what it saw and, when pages remain, leaves `cursor`
+ *   for the backfill and reports backfillPending.
+ * - backfill (backfill_*): continues the descending listing from `cursor` for
+ *   BACKFILL_PAGES_PER_RUN pages per run until the end, then sets backfill_done_at. It
+ *   never moves the high-water mark, so a sync can run at the same time.
+ * - sync (fetch_*, head done): ascending listing since the high-water mark, continued
+ *   from `sync_cursor` when a run hits MAX_PAGES_PER_RUN; the mark advances on completion.
+ *
+ * A run about to exhaust the rate limit saves its position and raises a transient
+ * rate_limited error timed to the reset, so the same job resumes from the cursor.
  */
 export async function extractStream<T>(
   ctx: ExtractContext,
   spec: StreamSpec<T>,
   repository: RepositoryRecord,
   jobId: number,
+  role: StreamRole = "fetch",
 ): Promise<ExtractResult> {
+  const repo = { owner: repository.owner, name: repository.name };
   const checkpoint = await getCheckpoint(ctx.db, repository.id, spec.stream);
-  const since = checkpoint?.last_item_at ? toGitHubTimestamp(checkpoint.last_item_at) : null;
-  let url = checkpoint?.cursor ?? spec.listUrl({ owner: repository.owner, name: repository.name }, since);
-  let highWater = checkpoint?.last_item_at ? Date.parse(checkpoint.last_item_at) : 0;
+  const phase: StreamPhase = role === "backfill" ? "backfill" : checkpoint?.head_done_at ? "sync" : "head";
   const totals = { pages: 0, records: 0, bytes: 0, upsertBytes: 0, inserted: 0, updated: 0, unchanged: 0 };
-  const base = { repository_id: repository.id, stream: spec.stream, job_id: jobId };
-  const inProgress = (cursor: string) => ({ ...base, cursor, last_item_at: checkpoint?.last_item_at ?? null });
+
+  let url: string;
+  let budget: number;
+  if (phase === "head") {
+    url = checkpoint?.cursor ?? spec.listUrl(repo, { since: null, direction: "desc" });
+    budget = HEAD_PAGES_PER_RUN;
+  } else if (phase === "backfill") {
+    if (!checkpoint?.cursor) return { done: true, phase, backfillPending: false, ...totals };
+    url = checkpoint.cursor;
+    budget = BACKFILL_PAGES_PER_RUN;
+  } else {
+    const since = checkpoint?.last_item_at ? overlapSince(checkpoint.last_item_at) : null;
+    url = checkpoint?.sync_cursor ?? spec.listUrl(repo, { since, direction: "asc" });
+    budget = MAX_PAGES_PER_RUN;
+  }
+
+  let highWater = checkpoint?.last_item_at ? Date.parse(checkpoint.last_item_at) : 0;
+  const mark = () => (highWater ? new Date(highWater).toISOString() : null);
+  const now = () => new Date().toISOString();
+  /** The stored row plus this run's counters and the given changes. */
+  const save = (changes: Partial<StreamCheckpoint>) =>
+    saveCheckpoint(ctx.db, {
+      repository_id: repository.id,
+      stream: spec.stream,
+      job_id: jobId,
+      pages_fetched: (checkpoint?.pages_fetched ?? 0) + totals.pages,
+      items_fetched: (checkpoint?.items_fetched ?? 0) + totals.records,
+      ...changes,
+    });
+  /** Where to continue: the head hands its pages to the backfill, the others continue themselves. */
+  const paused = (next: string): Partial<StreamCheckpoint> =>
+    phase === "sync" ? { sync_cursor: next } : phase === "head" ? { cursor: next, head_done_at: now(), last_item_at: mark(), last_synced_at: now() } : { cursor: next };
+  // A sync also reports a backfill that is still pending, in case its job was lost.
+  const backfillPending = Boolean(checkpoint?.cursor) && !checkpoint?.backfill_done_at;
 
   for (;;) {
     const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch });
@@ -68,10 +125,10 @@ export async function extractStream<T>(
     totals.inserted += counts.inserted;
     totals.updated += counts.updated;
     totals.unchanged += counts.unchanged;
-    for (const row of rows) highWater = Math.max(highWater, Date.parse(row.updated_at));
+    if (phase !== "backfill") for (const row of rows) highWater = Math.max(highWater, Date.parse(row.updated_at));
 
     if (page.nextUrl && page.remaining !== null && page.remaining < RATE_LIMIT_RESERVE) {
-      await saveCheckpoint(ctx.db, inProgress(page.nextUrl));
+      await save(paused(page.nextUrl));
       const wait = page.resetAt ? Math.max(1, page.resetAt - Math.floor(Date.now() / 1000) + 1) : 60;
       throw new JobError(
         "rate_limited",
@@ -79,20 +136,22 @@ export async function extractStream<T>(
         { transient: true, retryAfterSeconds: wait },
       );
     }
-    if (page.nextUrl && totals.pages < MAX_PAGES_PER_RUN) {
+    if (page.nextUrl && totals.pages < budget) {
       url = page.nextUrl;
       continue;
     }
     if (page.nextUrl) {
-      await saveCheckpoint(ctx.db, inProgress(page.nextUrl));
-      return { done: false, ...totals };
+      await save(paused(page.nextUrl));
+      return { done: phase === "head", phase, backfillPending: phase === "head" || backfillPending, ...totals };
     }
-    await saveCheckpoint(ctx.db, {
-      ...base,
-      cursor: null,
-      last_item_at: highWater ? new Date(highWater).toISOString() : null,
-    });
-    return { done: true, ...totals };
+    await save(
+      phase === "sync"
+        ? { sync_cursor: null, last_item_at: mark(), last_synced_at: now() }
+        : phase === "head"
+          ? { cursor: null, head_done_at: now(), backfill_done_at: now(), last_item_at: mark(), last_synced_at: now() }
+          : { cursor: null, backfill_done_at: now() },
+    );
+    return { done: true, phase, backfillPending: phase === "sync" && backfillPending, ...totals };
   }
 }
 
@@ -107,19 +166,24 @@ export function newestPerKey(rows: SourceDraft[]): SourceDraft[] {
   return [...byKey.values()];
 }
 
+/** The `since` of a sync: the high-water mark minus the overlap. Re-read unchanged items cost nothing. */
+export function overlapSince(lastItemAt: string): string {
+  return toGitHubTimestamp(new Date(Date.parse(lastItemAt) - SYNC_OVERLAP_SECONDS * 1000).toISOString());
+}
+
 /** GitHub wants YYYY-MM-DDTHH:MM:SSZ for `since`. */
 export function toGitHubTimestamp(iso: string): string {
   return new Date(iso).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-export function listUrl(repo: RepoRef, resource: string, since: string | null): string {
+export function listUrl(repo: RepoRef, resource: string, options: ListOptions): string {
   const url = new URL(
     `${GITHUB_API_ROOT}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/${resource}`,
   );
   url.searchParams.set("sort", "updated");
-  url.searchParams.set("direction", "asc");
+  url.searchParams.set("direction", options.direction);
   url.searchParams.set("per_page", String(PER_PAGE));
-  if (since) url.searchParams.set("since", since);
+  if (options.since) url.searchParams.set("since", options.since);
   return url.toString();
 }
 
@@ -143,8 +207,8 @@ export type GitHubIssue = {
 /** Issues and pull requests, which GitHub lists together. */
 export const ISSUES_STREAM: StreamSpec<GitHubIssue> = {
   stream: "issues",
-  listUrl: (repo, since) => {
-    const url = new URL(listUrl(repo, "issues", since));
+  listUrl: (repo, options) => {
+    const url = new URL(listUrl(repo, "issues", options));
     url.searchParams.set("state", "all");
     return url.toString();
   },
@@ -194,7 +258,7 @@ export function numberFromUrl(url: string): number {
  */
 export const ISSUE_COMMENTS_STREAM: StreamSpec<GitHubIssueComment> = {
   stream: "issue_comments",
-  listUrl: (repo, since) => listUrl(repo, "issues/comments", since),
+  listUrl: (repo, options) => listUrl(repo, "issues/comments", options),
   toSource: (item, repositoryId, jobId) => ({
     repository_id: repositoryId,
     type: "issue_comment",
@@ -237,7 +301,7 @@ export type GitHubReviewComment = {
 /** Inline review comments on pull request diffs, with their own checkpoint. */
 export const REVIEW_COMMENTS_STREAM: StreamSpec<GitHubReviewComment> = {
   stream: "review_comments",
-  listUrl: (repo, since) => listUrl(repo, "pulls/comments", since),
+  listUrl: (repo, options) => listUrl(repo, "pulls/comments", options),
   toSource: (item, repositoryId, jobId) => ({
     repository_id: repositoryId,
     type: "review_comment",
@@ -260,9 +324,23 @@ export const REVIEW_COMMENTS_STREAM: StreamSpec<GitHubReviewComment> = {
   }),
 };
 
-/** Job kind -> stream. */
-export const STREAMS: Record<string, StreamSpec<never>> = {
-  fetch_issues: ISSUES_STREAM as StreamSpec<never>,
-  fetch_issue_comments: ISSUE_COMMENTS_STREAM as StreamSpec<never>,
-  fetch_review_comments: REVIEW_COMMENTS_STREAM as StreamSpec<never>,
-};
+const SPECS = [ISSUES_STREAM, ISSUE_COMMENTS_STREAM, REVIEW_COMMENTS_STREAM] as StreamSpec<never>[];
+
+export function fetchKind(stream: string): string {
+  return `fetch_${stream}`;
+}
+
+export function backfillKind(stream: string): string {
+  return `backfill_${stream}`;
+}
+
+/** Job kind -> stream and role. fetch_* runs the head pass and the syncs; backfill_* the history. */
+export const STREAM_KINDS: Record<string, { spec: StreamSpec<never>; role: StreamRole }> = Object.fromEntries(
+  SPECS.flatMap((spec) => [
+    [fetchKind(spec.stream), { spec, role: "fetch" }],
+    [backfillKind(spec.stream), { spec, role: "backfill" }],
+  ]),
+);
+
+/** The jobs that start a repository: one head pass per stream. */
+export const FETCH_KINDS = SPECS.map((spec) => fetchKind(spec.stream));

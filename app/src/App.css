@@ -69,6 +69,33 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.coverage {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.streams {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.streams th,
+.streams td {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+.streams th {
+  border-top: none;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
 .search {
   margin-top: 32px;
 }

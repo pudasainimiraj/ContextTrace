@@ -117,12 +117,11 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("transformRepository", () => {
     expect(await transformRepository(db, REPO_ID)).toMatchObject({ done: true, documents: 0, passages: 0, inserted: 0 });
   });
 
-  it("leaves unchanged passages untouched after a re-fetch", async () => {
+  it("does not dirty a thread when a re-fetch returns the same content", async () => {
     const before = (await listPassages(db, REPO_ID, { number: 1 })).find((p) => p.source_github_id === 5001)!;
-    await upsertSources(db, SOURCES); // same data, newer fetched_at
+    expect(await upsertSources(db, SOURCES)).toEqual({ inserted: 0, updated: 0, unchanged: SOURCES.length }); // seen again, unchanged
     const result = await transformRepository(db, REPO_ID);
-    expect(result).toMatchObject({ done: true, documents: 3, inserted: 0, updated: 0, removed: 0 });
-    expect(result.unchanged).toBe(result.passages);
+    expect(result).toMatchObject({ done: true, documents: 0, passages: 0, inserted: 0, updated: 0, removed: 0 });
     const after = (await listPassages(db, REPO_ID, { number: 1 })).find((p) => p.source_github_id === 5001)!;
     expect(after.updated_at).toBe(before.updated_at);
   });

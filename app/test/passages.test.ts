@@ -30,6 +30,7 @@ function source(partial: Partial<SourceRecord> & Pick<SourceRecord, "type" | "gi
     closed_at: null,
     updated_at: partial.created_at,
     fetched_at: "2026-10-13T00:00:00Z",
+    seen_at: "2026-10-13T00:00:00Z",
     fetched_by_job: null,
     ...partial,
   };
