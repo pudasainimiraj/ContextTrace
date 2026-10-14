@@ -125,10 +125,14 @@ export async function extractStream<T>(
       items_fetched: (checkpoint?.items_fetched ?? 0) + totals.records,
       ...changes,
     });
-  /** Where to continue: the head hands its pages to the backfill, the others continue themselves. */
+  /**
+   * Where to continue: the head hands its pages to the backfill, the others continue
+   * themselves. A paused sync also advances the high-water mark: the listing is ascending,
+   * so everything before the cursor has been stored and what follows is newer.
+   */
   const paused = (next: string): Partial<StreamCheckpoint> =>
     phase === "sync"
-      ? { sync_cursor: next }
+      ? { sync_cursor: next, last_item_at: mark() }
       : phase === "head"
         ? { cursor: next, head_done_at: now(), last_item_at: mark(), last_synced_at: now() }
         : phase === "rescan"
