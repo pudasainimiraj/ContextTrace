@@ -17,6 +17,8 @@ export const BACKFILL_PAGES_PER_RUN = 3;
 export const BACKFILL_DELAY_SECONDS = 10;
 export const MAX_PAGES_PER_RUN = 5;
 export const PER_PAGE = 100;
+/** A sync lists since the high-water mark minus this, so items re-dated or served late around the mark are seen again. */
+export const SYNC_OVERLAP_SECONDS = 300;
 /** Stop paging when fewer requests than this remain before the rate limit resets. */
 export const RATE_LIMIT_RESERVE = 20;
 
@@ -87,7 +89,7 @@ export async function extractStream<T>(
     url = checkpoint.cursor;
     budget = BACKFILL_PAGES_PER_RUN;
   } else {
-    const since = checkpoint?.last_item_at ? toGitHubTimestamp(checkpoint.last_item_at) : null;
+    const since = checkpoint?.last_item_at ? overlapSince(checkpoint.last_item_at) : null;
     url = checkpoint?.sync_cursor ?? spec.listUrl(repo, { since, direction: "asc" });
     budget = MAX_PAGES_PER_RUN;
   }
@@ -162,6 +164,11 @@ export function newestPerKey(rows: SourceDraft[]): SourceDraft[] {
     if (!seen || Date.parse(row.updated_at) >= Date.parse(seen.updated_at)) byKey.set(key, row);
   }
   return [...byKey.values()];
+}
+
+/** The `since` of a sync: the high-water mark minus the overlap. Re-read unchanged items cost nothing. */
+export function overlapSince(lastItemAt: string): string {
+  return toGitHubTimestamp(new Date(Date.parse(lastItemAt) - SYNC_OVERLAP_SECONDS * 1000).toISOString());
 }
 
 /** GitHub wants YYYY-MM-DDTHH:MM:SSZ for `since`. */

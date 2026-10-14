@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
-import { type GitHubIssueComment, type GitHubReviewComment, toGitHubTimestamp } from "../worker/extract.ts";
+import { type GitHubIssueComment, type GitHubReviewComment, overlapSince, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
@@ -119,7 +119,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issue_comments", () => {
     const github = fakeGitHubPages([[issueComment(4, 8)]]);
     const { job } = await runJobOfKind("fetch_issue_comments", github);
     expect(job).toMatchObject({ state: "succeeded", result: { phase: "sync", records: 1 } });
-    expect(github.requests[0].searchParams.get("since")).toBe(at(3));
+    expect(github.requests[0].searchParams.get("since")).toBe(overlapSince(at(3)));
     expect(github.requests[0].searchParams.get("direction")).toBe("asc");
     expect(await listSources(db, REPO_ID, { number: 8 })).toHaveLength(2);
   });

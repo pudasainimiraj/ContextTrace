@@ -10,6 +10,7 @@ import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
 import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
+import { scheduleSyncs } from "./sync.ts";
 import { listSources } from "./sources.ts";
 import { createDb, getRepository, upsertRepository } from "./repositories.ts";
 
@@ -43,10 +44,12 @@ export default {
     return error(404, "not_found", "No such route");
   },
 
-  /** Cron: resend messages for jobs whose lease expired or whose retry message was lost. */
+  /** Cron: resend lost job messages, then queue incremental syncs for streams that are due. */
   async scheduled(_controller, env): Promise<void> {
-    const result = await reconcileJobs(createDb(env), env.JOBS_QUEUE);
-    console.log("reconciled jobs", result);
+    const db = createDb(env);
+    const reconciled = await reconcileJobs(db, env.JOBS_QUEUE);
+    const syncs = await scheduleSyncs(db, env.JOBS_QUEUE);
+    console.log("cron", { reconciled, syncs });
   },
 
   /** Queue consumer: one lease owner per batch, one claim per message. */

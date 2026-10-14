@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
-import { type GitHubIssue, RATE_LIMIT_RESERVE, toGitHubTimestamp } from "../worker/extract.ts";
+import { type GitHubIssue, overlapSince, RATE_LIMIT_RESERVE, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
@@ -141,12 +141,12 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("overlapping pages", () => {
     const mark = (await getCheckpoint(db, REPO_ID, "issues"))?.last_item_at;
     expect(mark && Date.parse(mark)).toBe(Date.parse(at(12)));
 
-    // The next run asks since the high-water mark. The boundary item comes back with the
-    // same timestamp (refreshed, counted as updated); a stale copy of another item is skipped.
+    // The next run asks since the high-water mark minus the overlap. The boundary item comes
+    // back unchanged (seen, not re-fetched); a stale copy of another item is skipped.
     const again = fakeGitHubPages([[edited, issue(9, { title: "stale copy", updated_at: at(8) })]]);
     const second = await runJob(again);
-    expect(again.requests[0].searchParams.get("since")).toBe(at(12));
-    expect(second.job).toMatchObject({ state: "succeeded", result: { inserted: 0, updated: 1, unchanged: 1 } });
+    expect(again.requests[0].searchParams.get("since")).toBe(overlapSince(at(12)));
+    expect(second.job).toMatchObject({ state: "succeeded", result: { inserted: 0, updated: 0, unchanged: 2 } });
     expect((await listSources(db, REPO_ID, { number: 10 }))[0]?.title).toBe("edited while paging");
     expect((await listSources(db, REPO_ID, { number: 9 }))[0]?.title).toBe("Issue 9");
   });

@@ -65,7 +65,8 @@ export type SourceRecord = {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
-  fetched_at: string;
+  fetched_at: string; // when the content last changed in a fetch
+  seen_at: string; // when a fetch last returned the record, changed or not
   fetched_by_job: number | null;
 };
 

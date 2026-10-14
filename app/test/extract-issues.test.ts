@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getCheckpoint } from "../worker/checkpoints.ts";
 import { consumeJobMessage } from "../worker/consumer.ts";
-import { BACKFILL_DELAY_SECONDS, BACKFILL_PAGES_PER_RUN, type GitHubIssue, HEAD_PAGES_PER_RUN, toGitHubTimestamp } from "../worker/extract.ts";
+import { BACKFILL_DELAY_SECONDS, BACKFILL_PAGES_PER_RUN, type GitHubIssue, HEAD_PAGES_PER_RUN, overlapSince, toGitHubTimestamp } from "../worker/extract.ts";
 import { createJob, enqueueJob, getJob, type JobQueue } from "../worker/jobs.ts";
 import { createDb, upsertRepository } from "../worker/repositories.ts";
 import { listSources } from "../worker/sources.ts";
@@ -168,7 +168,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch_issues", () => {
     const { job, queue } = await runJobOfKind("fetch_issues", github);
 
     expect(job).toMatchObject({ state: "succeeded", result: { phase: "sync", pages: 1, records: 2 } });
-    expect(github.requests[0].searchParams.get("since")).toBe(updatedAt(6));
+    expect(github.requests[0].searchParams.get("since")).toBe(overlapSince(updatedAt(6)));
     expect(github.requests[0].searchParams.get("direction")).toBe("asc");
     // No continuation and no backfill; the transform queued by the earlier runs is still waiting.
     expect(queue.send.mock.calls.map(([m]) => m.kind)).toEqual(["fetch_issues"]);
