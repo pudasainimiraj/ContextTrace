@@ -80,7 +80,7 @@ export type DocumentRecord = {
   number: number;
   title: string;
   transform_version: string;
-  sources_fetched_at: string;
+  sources_fetched_at: string | null; // null: a unit was retired, re-transform the thread
   transformed_at: string;
 };
 
@@ -159,19 +159,21 @@ export type SearchResponse = {
   unverified: number; // hits left out because their source link could not be verified
 };
 
-export type StreamPhase = "pending" | "head" | "backfill" | "complete";
+export type StreamPhase = "pending" | "head" | "backfill" | "rescan" | "complete";
 
 /** How far one extraction stream has come. */
 export type StreamCoverage = {
   stream: string; // issues | issue_comments | review_comments
   source_types: SourceType[]; // what the stream stores
-  phase: StreamPhase; // pending: not started; head: newest pages; backfill: history; complete: listed to the end
-  complete: boolean;
+  phase: StreamPhase; // pending: not started; head: newest pages; backfill: history; rescan: re-listing for deletions; complete: listed to the end
+  complete: boolean; // listed to the end at least once (a rescan does not reset this)
   high_water_mark: string | null; // updated_at of the newest item seen; the next sync lists since this
   last_synced_at: string | null; // last completed head or sync run
   backfill_done_at: string | null;
   backfill_pending: boolean; // a backfill cursor is waiting for its job
   sync_in_progress: boolean; // a sync left a cursor behind
+  rescan_in_progress: boolean;
+  last_rescan_at: string | null; // when deleted sources were last reconciled
   pages_fetched: number;
   items_fetched: number;
 };

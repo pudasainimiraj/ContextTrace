@@ -186,9 +186,16 @@ const STATUS_LABEL: Record<CoverageReport["status"], string> = {
   inaccessible: "No longer accessible on GitHub",
 };
 
+const PHASE_LABEL: Record<StreamCoverage["phase"], string> = {
+  pending: "pending",
+  head: "newest pages",
+  backfill: "backfilling history",
+  rescan: "checking for deletions",
+  complete: "complete",
+};
+
 function StreamRow({ stream }: { stream: StreamCoverage }) {
-  const phase =
-    stream.phase === "backfill" ? (stream.backfill_pending ? "backfilling history" : "backfill") : stream.phase === "head" ? "newest pages" : stream.phase;
+  const phase = PHASE_LABEL[stream.phase];
   return (
     <tr>
       <td>{stream.stream.replace("_", " ")}</td>

@@ -18,6 +18,19 @@ export async function upsertSources(db: SupabaseClient, rows: SourceDraft[]): Pr
   return data as UpsertCounts;
 }
 
+export type Retirement = { sources_removed: number; documents_removed: number; documents_dirtied: number };
+
+/**
+ * Deletes the repository's rows of the given types that no fetch has returned since
+ * `before` (a rescan's start). Their passages and vectors cascade away; threads that lost a
+ * unit are marked for re-transform; a thread whose opening is gone loses its document.
+ */
+export async function retireUnseenSources(db: SupabaseClient, repositoryId: number, types: SourceRecord["type"][], before: string): Promise<Retirement> {
+  const { data, error } = await db.rpc("retire_unseen_sources", { p_repository_id: repositoryId, p_types: types, p_before: before }).single();
+  if (error) throw new Error(`retire_unseen_sources failed: ${error.message}`);
+  return data as Retirement;
+}
+
 export const MAX_SOURCES_PAGE = 500;
 
 export async function listSources(

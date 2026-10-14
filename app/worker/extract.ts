@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { RepositoryRecord } from "../shared/api.ts";
+import type { RepositoryRecord, SourceType } from "../shared/api.ts";
 import { getCheckpoint, saveCheckpoint, type StreamCheckpoint } from "./checkpoints.ts";
 import { GITHUB_API_ROOT, githubGetPage, type GitHubOptions } from "./github-rest.ts";
 import { JobError } from "./retry.ts";
-import { type SourceDraft, upsertSources } from "./sources.ts";
+import { type Retirement, retireUnseenSources, type SourceDraft, upsertSources } from "./sources.ts";
 
 /**
  * Page budgets per job run. A stream's first run is a head pass over the newest items,
@@ -28,20 +28,25 @@ export type ListOptions = { since: string | null; direction: "asc" | "desc" };
 /** One GitHub list endpoint and how its items become source rows. */
 export type StreamSpec<T> = {
   stream: string; // checkpoint key
+  sourceTypes: SourceType[]; // what the stream stores; a rescan retires unseen rows of these types
   listUrl: (repo: RepoRef, options: ListOptions) => string;
   toSource: (item: T, repositoryId: number, jobId: number) => SourceDraft;
 };
 
 export type ExtractContext = GitHubOptions & { db: SupabaseClient };
 
-/** fetch_* jobs run the head pass, then syncs; backfill_* jobs continue the descending listing. */
-export type StreamRole = "fetch" | "backfill";
-export type StreamPhase = "head" | "sync" | "backfill";
+/**
+ * fetch_* jobs run the head pass, then syncs; backfill_* jobs continue the descending
+ * listing; rescan_* jobs walk it again from the start to find deletions.
+ */
+export type StreamRole = "fetch" | "backfill" | "rescan";
+export type StreamPhase = "head" | "sync" | "backfill" | "rescan";
 
 export type ExtractResult = {
   done: boolean;
   phase: StreamPhase;
-  backfillPending: boolean; // pages remain for a backfill_* job
+  followUpKind: string | null; // a low-priority job kind that must be waiting after this run
+  retired?: Retirement; // what a completed rescan removed
   pages: number;
   records: number; // items received from GitHub
   bytes: number; // response bodies received
@@ -63,6 +68,10 @@ export type ExtractResult = {
  *   never moves the high-water mark, so a sync can run at the same time.
  * - sync (fetch_*, head done): ascending listing since the high-water mark, continued
  *   from `sync_cursor` when a run hits MAX_PAGES_PER_RUN; the mark advances on completion.
+ * - rescan (rescan_*): the descending listing again from the start, in backfill-sized runs,
+ *   once the backfill is complete. Every row it returns gets a fresh seen_at; at the end the
+ *   stream's rows not seen since the rescan began are retired with their passages and
+ *   vectors. Like the backfill it never moves the high-water mark.
  *
  * A run about to exhaust the rate limit saves its position and raises a transient
  * rate_limited error timed to the reset, so the same job resumes from the cursor.
@@ -76,17 +85,26 @@ export async function extractStream<T>(
 ): Promise<ExtractResult> {
   const repo = { owner: repository.owner, name: repository.name };
   const checkpoint = await getCheckpoint(ctx.db, repository.id, spec.stream);
-  const phase: StreamPhase = role === "backfill" ? "backfill" : checkpoint?.head_done_at ? "sync" : "head";
+  const phase: StreamPhase = role === "fetch" ? (checkpoint?.head_done_at ? "sync" : "head") : role;
   const totals = { pages: 0, records: 0, bytes: 0, upsertBytes: 0, inserted: 0, updated: 0, unchanged: 0 };
+  const nothing = (): ExtractResult => ({ done: true, phase, followUpKind: null, ...totals });
 
   let url: string;
   let budget: number;
+  let rescanStartedAt: string | null = null;
   if (phase === "head") {
     url = checkpoint?.cursor ?? spec.listUrl(repo, { since: null, direction: "desc" });
     budget = HEAD_PAGES_PER_RUN;
   } else if (phase === "backfill") {
-    if (!checkpoint?.cursor) return { done: true, phase, backfillPending: false, ...totals };
+    // Nothing to do once the listing reached the end, or while a rescan owns the cursor.
+    if (!checkpoint?.cursor || checkpoint.rescan_started_at) return nothing();
     url = checkpoint.cursor;
+    budget = BACKFILL_PAGES_PER_RUN;
+  } else if (phase === "rescan") {
+    // A rescan starts only after the backfill; a cursor without rescan_started_at is the backfill's.
+    if (!checkpoint?.backfill_done_at || (checkpoint.cursor && !checkpoint.rescan_started_at)) return nothing();
+    rescanStartedAt = checkpoint.rescan_started_at ?? new Date().toISOString();
+    url = checkpoint.rescan_started_at ? (checkpoint.cursor ?? spec.listUrl(repo, { since: null, direction: "desc" })) : spec.listUrl(repo, { since: null, direction: "desc" });
     budget = BACKFILL_PAGES_PER_RUN;
   } else {
     const since = checkpoint?.last_item_at ? overlapSince(checkpoint.last_item_at) : null;
@@ -107,11 +125,21 @@ export async function extractStream<T>(
       items_fetched: (checkpoint?.items_fetched ?? 0) + totals.records,
       ...changes,
     });
-  /** Where to continue: the head hands its pages to the backfill, the others continue themselves. */
+  /**
+   * Where to continue: the head hands its pages to the backfill, the others continue
+   * themselves. A paused sync also advances the high-water mark: the listing is ascending,
+   * so everything before the cursor has been stored and what follows is newer.
+   */
   const paused = (next: string): Partial<StreamCheckpoint> =>
-    phase === "sync" ? { sync_cursor: next } : phase === "head" ? { cursor: next, head_done_at: now(), last_item_at: mark(), last_synced_at: now() } : { cursor: next };
-  // A sync also reports a backfill that is still pending, in case its job was lost.
-  const backfillPending = Boolean(checkpoint?.cursor) && !checkpoint?.backfill_done_at;
+    phase === "sync"
+      ? { sync_cursor: next, last_item_at: mark() }
+      : phase === "head"
+        ? { cursor: next, head_done_at: now(), last_item_at: mark(), last_synced_at: now() }
+        : phase === "rescan"
+          ? { cursor: next, rescan_started_at: rescanStartedAt }
+          : { cursor: next };
+  // A sync also reports a backfill or rescan that still owns the cursor, in case its job was lost.
+  const pendingWalk = checkpoint?.cursor ? (checkpoint.rescan_started_at ? rescanKind(spec.stream) : backfillKind(spec.stream)) : null;
 
   for (;;) {
     const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch });
@@ -125,7 +153,7 @@ export async function extractStream<T>(
     totals.inserted += counts.inserted;
     totals.updated += counts.updated;
     totals.unchanged += counts.unchanged;
-    if (phase !== "backfill") for (const row of rows) highWater = Math.max(highWater, Date.parse(row.updated_at));
+    if (phase === "head" || phase === "sync") for (const row of rows) highWater = Math.max(highWater, Date.parse(row.updated_at));
 
     if (page.nextUrl && page.remaining !== null && page.remaining < RATE_LIMIT_RESERVE) {
       await save(paused(page.nextUrl));
@@ -142,7 +170,12 @@ export async function extractStream<T>(
     }
     if (page.nextUrl) {
       await save(paused(page.nextUrl));
-      return { done: phase === "head", phase, backfillPending: phase === "head" || backfillPending, ...totals };
+      return { done: phase === "head", phase, followUpKind: phase === "head" ? backfillKind(spec.stream) : phase === "sync" ? pendingWalk : null, ...totals };
+    }
+    if (phase === "rescan") {
+      const retired = await retireUnseenSources(ctx.db, repository.id, spec.sourceTypes, rescanStartedAt!);
+      await save({ cursor: null, rescan_started_at: null, last_rescan_at: now() });
+      return { done: true, phase, followUpKind: null, retired, ...totals };
     }
     await save(
       phase === "sync"
@@ -151,7 +184,7 @@ export async function extractStream<T>(
           ? { cursor: null, head_done_at: now(), backfill_done_at: now(), last_item_at: mark(), last_synced_at: now() }
           : { cursor: null, backfill_done_at: now() },
     );
-    return { done: true, phase, backfillPending: phase === "sync" && backfillPending, ...totals };
+    return { done: true, phase, followUpKind: phase === "sync" ? pendingWalk : null, ...totals };
   }
 }
 
@@ -207,6 +240,7 @@ export type GitHubIssue = {
 /** Issues and pull requests, which GitHub lists together. */
 export const ISSUES_STREAM: StreamSpec<GitHubIssue> = {
   stream: "issues",
+  sourceTypes: ["issue", "pull_request"],
   listUrl: (repo, options) => {
     const url = new URL(listUrl(repo, "issues", options));
     url.searchParams.set("state", "all");
@@ -258,6 +292,7 @@ export function numberFromUrl(url: string): number {
  */
 export const ISSUE_COMMENTS_STREAM: StreamSpec<GitHubIssueComment> = {
   stream: "issue_comments",
+  sourceTypes: ["issue_comment"],
   listUrl: (repo, options) => listUrl(repo, "issues/comments", options),
   toSource: (item, repositoryId, jobId) => ({
     repository_id: repositoryId,
@@ -301,6 +336,7 @@ export type GitHubReviewComment = {
 /** Inline review comments on pull request diffs, with their own checkpoint. */
 export const REVIEW_COMMENTS_STREAM: StreamSpec<GitHubReviewComment> = {
   stream: "review_comments",
+  sourceTypes: ["review_comment"],
   listUrl: (repo, options) => listUrl(repo, "pulls/comments", options),
   toSource: (item, repositoryId, jobId) => ({
     repository_id: repositoryId,
@@ -334,13 +370,21 @@ export function backfillKind(stream: string): string {
   return `backfill_${stream}`;
 }
 
-/** Job kind -> stream and role. fetch_* runs the head pass and the syncs; backfill_* the history. */
+export function rescanKind(stream: string): string {
+  return `rescan_${stream}`;
+}
+
+/** Job kind -> stream and role. fetch_* runs the head pass and the syncs; backfill_* the history; rescan_* the deletion sweep. */
 export const STREAM_KINDS: Record<string, { spec: StreamSpec<never>; role: StreamRole }> = Object.fromEntries(
   SPECS.flatMap((spec) => [
     [fetchKind(spec.stream), { spec, role: "fetch" }],
     [backfillKind(spec.stream), { spec, role: "backfill" }],
+    [rescanKind(spec.stream), { spec, role: "rescan" }],
   ]),
 );
+
+/** Stream -> the source types it stores. */
+export const STREAM_SOURCE_TYPES: Record<string, SourceType[]> = Object.fromEntries(SPECS.map((spec) => [spec.stream, spec.sourceTypes]));
 
 /** The jobs that start a repository: one head pass per stream. */
 export const FETCH_KINDS = SPECS.map((spec) => fetchKind(spec.stream));

@@ -49,6 +49,30 @@ export async function refreshRepositoryStatus(
   return (data ?? null) as RepositoryStatus | null;
 }
 
+/** GitHub stopped serving the repository: the scheduler leaves it alone and searches warn. */
+export async function markRepositoryInaccessible(db: SupabaseClient, repositoryId: number, reason: string): Promise<void> {
+  const { error } = await db
+    .from("repositories")
+    .update({ status: "inaccessible", last_error: reason.slice(0, 500), status_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", repositoryId);
+  if (error) throw new Error(`update repositories failed: ${error.message}`);
+}
+
+/**
+ * A resubmission found the repository public again: clear the error, let the stored data
+ * decide between registered, partial and searchable, and return the fresh row.
+ */
+export async function reinstateRepository(db: SupabaseClient, repositoryId: number, transformVersion: string): Promise<RepositoryRecord> {
+  const { error } = await db
+    .from("repositories")
+    .update({ status: "registered", last_error: null, status_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", repositoryId)
+    .eq("status", "inaccessible");
+  if (error) throw new Error(`update repositories failed: ${error.message}`);
+  await refreshRepositoryStatus(db, repositoryId, transformVersion);
+  return (await getRepository(db, repositoryId))!;
+}
+
 export async function getRepository(db: SupabaseClient, id: number): Promise<RepositoryRecord | null> {
   const { data, error } = await db.from("repositories").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(`select repositories failed: ${error.message}`);

@@ -10,9 +10,10 @@ import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
 import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
-import { scheduleSyncs } from "./sync.ts";
+import { scheduleRescans, scheduleSyncs } from "./sync.ts";
 import { listSources } from "./sources.ts";
-import { createDb, getRepository, upsertRepository } from "./repositories.ts";
+import { createDb, getRepository, reinstateRepository, upsertRepository } from "./repositories.ts";
+import { TRANSFORM_VERSION } from "./transform.ts";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -44,12 +45,13 @@ export default {
     return error(404, "not_found", "No such route");
   },
 
-  /** Cron: resend lost job messages, then queue incremental syncs for streams that are due. */
+  /** Cron: resend lost job messages, then queue the syncs and deletion rescans that are due. */
   async scheduled(_controller, env): Promise<void> {
     const db = createDb(env);
     const reconciled = await reconcileJobs(db, env.JOBS_QUEUE);
     const syncs = await scheduleSyncs(db, env.JOBS_QUEUE);
-    console.log("cron", { reconciled, syncs });
+    const rescans = await scheduleRescans(db, env.JOBS_QUEUE);
+    console.log("cron", { reconciled, syncs, rescans });
   },
 
   /** Queue consumer: one lease owner per batch, one claim per message. */
@@ -79,9 +81,16 @@ async function submitRepository(request: Request, env: Env): Promise<Response> {
   if (lookup.kind !== "ok") return lookupError(lookup);
 
   const db = createDb(env);
-  const { row, created } = await upsertRepository(db, lookup.repo);
-  // A newly registered repository starts its extraction streams at once.
+  const upserted = await upsertRepository(db, lookup.repo);
+  const { created } = upserted;
+  let { row } = upserted;
+  // A newly registered repository starts its extraction streams at once. One that GitHub had
+  // stopped serving is public again: clear the mark and catch up through the same streams.
   if (created) await startExtraction(db, env.JOBS_QUEUE, row.id);
+  if (row.status === "inaccessible") {
+    row = await reinstateRepository(db, row.id, TRANSFORM_VERSION);
+    await startExtraction(db, env.JOBS_QUEUE, row.id);
+  }
   return created
     ? json(row, { status: 201, headers: { Location: `/api/repositories/${row.id}` } })
     : json(row);
