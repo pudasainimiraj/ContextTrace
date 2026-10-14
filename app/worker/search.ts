@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord, SearchConfidence, SearchIndexState, SearchMode, SearchResponse } from "../shared/api.ts";
+import { type Budget, milliNeuronsFor, QUERY_RESERVE_MILLI_NEURONS } from "./budget.ts";
 import { embeddingStats } from "./embed.ts";
 import { type EmbeddingClient, validateVector } from "./embeddings.ts";
 import { resolveEvidence } from "./evidence.ts";
@@ -19,7 +20,7 @@ export const MAX_QUERY_CHARS = 500;
 export const SCORE_HIGH = 0.8;
 export const SCORE_LOW = 0.7;
 
-export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient };
+export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient; budget?: Budget };
 export type SearchRequest = { repository: RepositoryRecord; query: string; limit?: number };
 
 export type SearchMatch = {
@@ -41,9 +42,12 @@ export function belongsToRepository(documentId: string, repositoryId: number): b
 export async function embedQuery(
   embeddings: EmbeddingClient | undefined,
   query: string,
+  budget?: Budget,
 ): Promise<{ vector: number[]; durationMs: number }> {
   if (!embeddings) throw new JobError("ai_not_configured", "No embedding client is configured", { transient: false });
+  if (budget) await budget.take("ai_neurons_milli", QUERY_RESERVE_MILLI_NEURONS);
   const result = await embeddings.embed([query]);
+  if (budget && result.tokens !== undefined) await budget.settle("ai_neurons_milli", milliNeuronsFor(result.tokens) - QUERY_RESERVE_MILLI_NEURONS);
   const vector = result.vectors[0];
   const problem = validateVector(vector);
   if (problem) throw new JobError("ai_invalid_output", `Query vector is ${problem}`, { transient: false });
@@ -142,7 +146,7 @@ async function semanticSearch(
   limit: number,
 ): Promise<{ hits: SearchMatch[]; embedMs: number | null; error: string | null }> {
   try {
-    const { vector, durationMs } = await embedQuery(ctx.embeddings, query);
+    const { vector, durationMs } = await embedQuery(ctx.embeddings, query, ctx.budget);
     return { hits: await searchSemantic(ctx.db, repositoryId, vector, limit), embedMs: durationMs, error: null };
   } catch (err) {
     if (!(err instanceof JobError)) throw err;

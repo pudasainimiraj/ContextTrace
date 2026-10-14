@@ -195,6 +195,25 @@ export type CoverageReport = {
   jobs: { queued: number; running: number; retry_pending: number; failed: number };
 };
 
+/** One metered resource as the budget ledger sees it now. */
+export type BudgetState = {
+  resource: string;
+  period: "hour" | "day" | "month" | "gauge";
+  used: number;
+  limit: number;
+  remaining_pct: number;
+  paused: boolean; // used >= limit: reservations are refused until resets_at
+  resets_at: string | null; // null for a gauge
+};
+
+/** GET /api/status: whether the service is pausing itself, and why. Never carries a secret. */
+export type ServiceStatus = {
+  paused: boolean;
+  reasons: string[]; // one line per exhausted budget
+  budgets: BudgetState[];
+  generated_at: string;
+};
+
 /** Embedding coverage and metering for one repository. */
 export type EmbeddingStats = {
   repository_id: number;

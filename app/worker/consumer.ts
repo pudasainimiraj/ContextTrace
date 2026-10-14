@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
 import { EMBED_JOB_KIND, embedPassages } from "./embed.ts";
+import type { Budget } from "./budget.ts";
 import type { EmbeddingClient } from "./embeddings.ts";
 import { BACKFILL_DELAY_SECONDS, extractStream, STREAM_KINDS } from "./extract.ts";
 import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
@@ -14,6 +15,7 @@ export type JobContext = {
   token?: string;
   fetch?: typeof globalThis.fetch;
   embeddings?: EmbeddingClient;
+  budget?: Budget; // metered calls reserve here; absent in tests that do not meter
 };
 
 /** A job kind to queue after a run, unless one is already waiting; delayed for low-priority work. */

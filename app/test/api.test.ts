@@ -110,8 +110,9 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     const lookups = fakeGitHub.mock.calls.filter(([input]) => new URL(hrefOf(input)).pathname === "/repos/dagster-io/dagster");
     expect(lookups).toHaveLength(3);
 
-    // Registration started one extraction job per stream, once.
-    const { data: jobs } = await createDb(env).from("jobs").select("kind").eq("repository_id", ID_DAGSTER).order("kind");
+    // Registration started one extraction job per stream, once. The local queue may already
+    // have run them and chained a transform, so only the fetch kinds are counted.
+    const { data: jobs } = await createDb(env).from("jobs").select("kind").eq("repository_id", ID_DAGSTER).like("kind", "fetch_%").order("kind");
     expect(jobs?.map((j) => j.kind)).toEqual(["fetch_issue_comments", "fetch_issues", "fetch_review_comments"]);
   });
 

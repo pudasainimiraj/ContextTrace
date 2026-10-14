@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
+import { type Budget, isBudgetExhausted, QUEUE_OPS_PER_MESSAGE } from "./budget.ts";
 
 /** Compact queue message. Everything else is read from the job row on delivery. */
 export type JobMessage = {
@@ -12,6 +13,16 @@ export type JobMessage = {
 /** The part of a Cloudflare Queue producer binding that enqueueJob uses. */
 export type JobQueue = { send(message: JobMessage, options?: { delaySeconds?: number }): Promise<unknown> };
 
+/** A queue whose sends reserve queue operations first; a refused reservation throws budget_exhausted before anything is sent. */
+export function meteredQueue(queue: JobQueue, budget: Budget): JobQueue {
+  return {
+    async send(message, options) {
+      await budget.take("queue_ops", QUEUE_OPS_PER_MESSAGE);
+      return queue.send(message, options);
+    },
+  };
+}
+
 export async function createJob(db: SupabaseClient, repositoryId: number, kind: string): Promise<JobRecord> {
   const { data, error } = await db.from("jobs").insert({ repository_id: repositoryId, kind }).select().single();
   if (error) throw new Error(`insert jobs failed: ${error.message}`);
@@ -22,7 +33,8 @@ export async function createJob(db: SupabaseClient, repositoryId: number, kind: 
  * Bumps the job's generation and sends one message that carries it, optionally delayed.
  * Only a queued or retry_pending job can be enqueued; returns null otherwise. A consumer
  * compares the message generation with the row, so a message from an earlier enqueue
- * is recognised as stale.
+ * is recognised as stale. When the queue budget refuses the send, the row stays queued
+ * without a message and the reconcile cron sends it once the budget's window has reset.
  */
 export async function enqueueJob(
   db: SupabaseClient,
@@ -35,7 +47,12 @@ export async function enqueueJob(
   if (!data) return null;
   const job = data as JobRecord;
   const message: JobMessage = { jobId: job.id, repoId: job.repository_id, kind: job.kind, generation: job.generation };
-  await queue.send(message, options.delaySeconds ? { delaySeconds: options.delaySeconds } : undefined);
+  try {
+    await queue.send(message, options.delaySeconds ? { delaySeconds: options.delaySeconds } : undefined);
+  } catch (err) {
+    if (!isBudgetExhausted(err)) throw err;
+    console.warn(`job ${job.id} stays queued without a message: ${err.message}`);
+  }
   return job;
 }
 

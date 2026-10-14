@@ -11,6 +11,7 @@ import {
   usdFor,
   validateVector,
 } from "./embeddings.ts";
+import { type Budget, milliNeuronsFor } from "./budget.ts";
 import { refreshRepositoryStatus } from "./repositories.ts";
 import { JobError } from "./retry.ts";
 import { TRANSFORM_VERSION } from "./transform.ts";
@@ -19,7 +20,7 @@ export const EMBED_JOB_KIND = "embed_passages";
 /** Batches per job run before the job yields to a continuation job. */
 export const MAX_BATCHES_PER_RUN = 5;
 
-export type EmbedContext = { db: SupabaseClient; embeddings?: EmbeddingClient };
+export type EmbedContext = { db: SupabaseClient; embeddings?: EmbeddingClient; budget?: Budget };
 export type EmbedOptions = { batchSize?: number; maxBatches?: number };
 export type PendingPassage = { passage_id: string; text: string; token_count: number; content_hash: string };
 
@@ -95,12 +96,17 @@ export async function embedPassages(
   let firstBatchStored = false;
   try {
     for (const batch of chunk(ordered, batchSize)) {
+      // Workers AI meters every text at the batch's longest, so that is what is reserved;
+      // the reservation is settled to the metered count once the response reports it.
+      const estimatedTokens = batch.length * Math.max(...batch.map((p) => p.token_count));
+      if (ctx.budget) await ctx.budget.take("ai_neurons_milli", milliNeuronsFor(estimatedTokens));
       const result = await client.embed(batch.map((p) => p.text));
       totals.batches += 1;
       totals.texts += batch.length;
       totals.embedMs += result.durationMs;
       totals.tokens += batch.reduce((sum, p) => sum + p.token_count, 0);
-      totals.billedTokens += result.tokens ?? batch.length * Math.max(...batch.map((p) => p.token_count));
+      totals.billedTokens += result.tokens ?? estimatedTokens;
+      if (ctx.budget && result.tokens !== undefined) await ctx.budget.settle("ai_neurons_milli", milliNeuronsFor(result.tokens) - milliNeuronsFor(estimatedTokens));
 
       const drafts: PassageEmbeddingDraft[] = [];
       batch.forEach((p, i) => {

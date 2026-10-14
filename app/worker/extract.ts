@@ -142,7 +142,7 @@ export async function extractStream<T>(
   const pendingWalk = checkpoint?.cursor ? (checkpoint.rescan_started_at ? rescanKind(spec.stream) : backfillKind(spec.stream)) : null;
 
   for (;;) {
-    const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch });
+    const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch, budget: ctx.budget });
     totals.pages += 1;
     totals.bytes += page.bytes;
 
