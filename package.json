@@ -1,0 +1,38 @@
+{
+  "name": "contexttrace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run build && wrangler deploy --config dist/contexttrace/wrangler.json",
+    "cf-typegen": "wrangler types --env-file .env.example",
+    "eval": "node tests/evaluation/run.ts",
+    "db:push": "supabase db push --db-url \"$SUPABASE_DB_URL\""
+  },
+  "dependencies": {
+    "@huggingface/tokenizers": "0.2.0",
+    "@supabase/supabase-js": "2.117.3",
+    "entities": "8.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.1",
+    "@cloudflare/vitest-plugin": "^1.4.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.4",
+    "wrangler": "^4.149.0"
+  }
+}
