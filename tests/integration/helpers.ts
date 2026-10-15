@@ -51,12 +51,15 @@ export type FakeGitHub = { fetch: typeof globalThis.fetch; requests: URL[] };
 /**
  * A stubbed GitHub list endpoint: serves `pages` in order with rel="next" Link headers
  * and records every request. `respond` can override any request, for error cases;
- * `headersFor` adds headers to a page's response, for rate-limit cases.
+ * `headersFor` adds headers to a page's response, for rate-limit cases. With
+ * `linkRepositoryId` the next links take GitHub's real form, which names the repository
+ * by id (`/repositories/{id}/issues?page=2`) instead of `/repos/{owner}/{name}/`.
  */
 export function fakeGitHubPages(
   pages: unknown[][],
   respond?: (url: URL) => Response | undefined,
   headersFor?: (page: number) => Record<string, string>,
+  options: { linkRepositoryId?: number } = {},
 ): FakeGitHub {
   const requests: URL[] = [];
   const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
@@ -69,6 +72,7 @@ export function fakeGitHubPages(
     if (page < pages.length) {
       const next = new URL(url);
       next.searchParams.set("page", String(page + 1));
+      if (options.linkRepositoryId !== undefined) next.pathname = next.pathname.replace(/^\/repos\/[^/]+\/[^/]+\//, `/repositories/${options.linkRepositoryId}/`);
       headers.Link = `<${next}>; rel="next"`;
     }
     return jsonResponse(200, pages[page - 1] ?? [], headers);

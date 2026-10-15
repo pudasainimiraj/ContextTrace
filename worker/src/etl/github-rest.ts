@@ -8,7 +8,7 @@ export const GITHUB_API_ROOT = "https://api.github.com";
  * The extractor fetches only GitHub's REST API, and only under the job's own repository. A
  * cursor is a URL read back from the database, so it is checked before every request.
  */
-export function assertGitHubApiUrl(url: string, repo?: { owner: string; name: string }): void {
+export function assertGitHubApiUrl(url: string, repo?: { owner: string; name: string; id?: number }): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -18,8 +18,11 @@ export function assertGitHubApiUrl(url: string, repo?: { owner: string; name: st
   if (parsed.protocol !== "https:" || parsed.hostname !== "api.github.com" || parsed.username || parsed.password) {
     throw new JobError("invalid_cursor", "Fetch target is not GitHub's API", { transient: false });
   }
-  if (repo && !parsed.pathname.startsWith(`/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/`)) {
-    throw new JobError("invalid_cursor", "Fetch target is outside the job's repository", { transient: false });
+  if (repo) {
+    const byName = parsed.pathname.startsWith(`/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/`);
+    // GitHub's pagination Link headers name the repository by id: /repositories/{id}/issues?page=2
+    const byId = repo.id !== undefined && parsed.pathname.startsWith(`/repositories/${repo.id}/`);
+    if (!byName && !byId) throw new JobError("invalid_cursor", "Fetch target is outside the job's repository", { transient: false });
   }
 }
 

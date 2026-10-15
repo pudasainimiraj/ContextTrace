@@ -38,7 +38,10 @@ function issue(n: number, opts: { pr?: boolean; title?: string; updated_at?: str
   };
 }
 
-const fakeGitHub = fakeGitHubPages;
+// Next links take GitHub's real `/repositories/{id}/` form, so every multi-page run here
+// checks that the pinned-fetch guard follows them (it rejected them until 2026-10-15).
+const fakeGitHub = (pages: unknown[][], respond?: Parameters<typeof fakeGitHubPages>[1], headersFor?: Parameters<typeof fakeGitHubPages>[2]) =>
+  fakeGitHubPages(pages, respond, headersFor, { linkRepositoryId: REPO_ID });
 
 function fakeQueue() {
   return { send: vi.fn<JobQueue["send"]>(async () => {}) };

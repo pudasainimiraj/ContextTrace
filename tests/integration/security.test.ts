@@ -147,6 +147,16 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("fetch targets", () => {
     expect(() => assertGitHubApiUrl("not a url")).toThrow(/not a URL/);
   });
 
+  it("accepts GitHub's pagination form, which names the repository by id, only for the job's id", () => {
+    // Real header: Link: <https://api.github.com/repositories/45717250/issues?state=all&per_page=100&page=2>; rel="next"
+    const repo = { owner: "alice", name: "security", id: 45717250 };
+    expect(() => assertGitHubApiUrl("https://api.github.com/repositories/45717250/issues?state=all&per_page=100&page=2", repo)).not.toThrow();
+    expect(() => assertGitHubApiUrl("https://api.github.com/repositories/45717250/issues/comments?page=2", repo)).not.toThrow();
+    expect(() => assertGitHubApiUrl("https://api.github.com/repositories/457172500/issues?page=2", repo)).toThrow(/outside the job's repository/);
+    expect(() => assertGitHubApiUrl("https://api.github.com/repositories/1/issues?page=2", repo)).toThrow(/outside the job's repository/);
+    expect(() => assertGitHubApiUrl("https://api.github.com/repositories/45717250/issues?page=2", { owner: "alice", name: "security" })).toThrow(/outside the job's repository/);
+  });
+
   it("never follows a tampered cursor: the job fails, the cursor is cleared, nothing is fetched", async () => {
     await saveCheckpoint(db, { repository_id: REPO, stream: "issues", cursor: "https://evil.example/repos/alice/security/issues?page=2", head_done_at: new Date().toISOString() });
     const github = fakeGitHubPages([[]]);

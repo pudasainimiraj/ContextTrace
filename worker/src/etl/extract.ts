@@ -151,7 +151,7 @@ export async function extractStream<T>(
   for (;;) {
     // Cursors come back from the database: a tampered one is dropped and the job fails.
     try {
-      assertGitHubApiUrl(url, repo);
+      assertGitHubApiUrl(url, { ...repo, id: repository.id });
     } catch (err) {
       await save({ cursor: null, sync_cursor: null, rescan_started_at: null });
       throw err;
