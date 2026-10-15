@@ -2,12 +2,13 @@ import type { ApiError, ServiceStatus, SourceType } from "../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "./admin.ts";
 import { admissionState, findByFullName } from "./admission.ts";
-import { Budget, budgetExhausted as budgetExhaustedError, databaseSize, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
+import { Budget, budgetExhausted as budgetExhaustedError, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
 import { consumeJobMessage } from "./consumer.ts";
 import { getCoverage } from "./coverage.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage, type JobQueue, meteredQueue } from "./jobs.ts";
+import { maintain, removeRepository, storageState } from "./maintenance.ts";
 import { listPassages } from "./documents.ts";
 import { embeddingStats } from "./embed.ts";
 import { createEmbeddingClient } from "./embeddings.ts";
@@ -58,9 +59,8 @@ export default {
       const reconciled = await reconcileJobs(app.db, app.queue);
       const syncs = await scheduleSyncs(app.db, app.queue, { budget: app.budget });
       const rescans = await scheduleRescans(app.db, app.queue, { budget: app.budget });
-      const storageBytes = await databaseSize(app.db);
-      await app.budget.gauge("storage_bytes", storageBytes);
-      console.log("cron", { reconciled, syncs, rescans, storageBytes });
+      const maintenance = await maintain(app.db, app.budget);
+      console.log("cron", { reconciled, syncs, rescans, maintenance });
     } finally {
       settleEgress(app, ctx);
     }
@@ -105,6 +105,10 @@ async function route(request: Request, app: App): Promise<Response> {
   if (method === "POST" && jobsOf) {
     return (await requireAdmin(request, env.ADMIN_TOKEN)) ?? createRepositoryJob(request, app, Number(jobsOf[1]));
   }
+  const byIdDelete = /^\/api\/repositories\/(\d+)$/.exec(pathname);
+  if (method === "DELETE" && byIdDelete) {
+    return (await requireAdmin(request, env.ADMIN_TOKEN)) ?? deleteRepository(app, Number(byIdDelete[1]));
+  }
   if (method === "GET") {
     const limited = await rateLimitResponse(env.READ_LIMITER, request, "read");
     if (limited) return limited;
@@ -132,7 +136,7 @@ async function route(request: Request, app: App): Promise<Response> {
 
 /** GET /api/status -> whether the service is pausing itself at a budget cap, and why. */
 async function getServiceStatus(app: App): Promise<Response> {
-  const [budgets, admissions] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget)]);
+  const [budgets, admissions, storage] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget), storageState(app.budget)]);
   const exhausted = budgets.filter((b) => b.paused);
   const body: ServiceStatus = {
     paused: exhausted.length > 0,
@@ -140,6 +144,7 @@ async function getServiceStatus(app: App): Promise<Response> {
     budgets,
     admissions,
     protections: { turnstile: Boolean(app.env.TURNSTILE_SECRET_KEY), rate_limits: Boolean(app.env.SEARCH_LIMITER), admin: Boolean(app.env.ADMIN_TOKEN) },
+    storage,
     generated_at: new Date().toISOString(),
   };
   return json(body);
@@ -198,7 +203,7 @@ async function submitRepository(request: Request, app: App): Promise<Response> {
   // A newly registered repository starts its extraction streams at once. One that GitHub had
   // stopped serving is public again: clear the mark and catch up through the same streams.
   if (created) await startExtraction(db, app.queue, row.id);
-  if (row.status === "inaccessible") {
+  if (row.status === "inaccessible" || row.status === "removed") {
     row = await reinstateRepository(db, row.id, TRANSFORM_VERSION);
     await startExtraction(db, app.queue, row.id);
   }
@@ -287,6 +292,14 @@ async function getRepositoryCoverage({ db }: App, repositoryId: number): Promise
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
   return json(await getCoverage(db, repository));
+}
+
+/** DELETE /api/repositories/:id (admin) -> removes everything the repository holds; the row stays as a tombstone */
+async function deleteRepository({ db }: App, repositoryId: number): Promise<Response> {
+  const repository = await getRepository(db, repositoryId);
+  if (!repository) return error(404, "not_found", "Repository is not registered");
+  const removal = await removeRepository(db, repositoryId, "removed by an operator");
+  return json({ repository_id: repositoryId, status: "removed", removed: removal });
 }
 
 /** GET /api/repositories/:id */

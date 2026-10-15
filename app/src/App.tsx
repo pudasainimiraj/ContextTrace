@@ -162,11 +162,14 @@ function StatusBanner() {
       clearInterval(timer);
     };
   }, []);
-  if (!status || (!status.paused && status.admissions.open)) return null;
+  if (!status || (!status.paused && status.admissions.open && status.storage.level === "ok")) return null;
   return (
     <p role="status" className="notice warning">
       {status.paused ? `Paused at a free-tier budget: ${status.reasons.join("; ")}. The service resumes by itself.` : null}
       {!status.admissions.open ? ` ${status.admissions.reason}.` : null}
+      {status.storage.level !== "ok"
+        ? ` Storage is at ${Math.round((status.storage.used / status.storage.limit) * 100)}% of its budget: ${status.storage.level === "critical" ? "syncs, backfills and rescans" : "backfills and rescans"} wait until space is freed.`
+        : null}
     </p>
   );
 }
@@ -193,7 +196,7 @@ function CoveragePanel({ repositoryId }: { repositoryId: number }) {
         const report = body as CoverageReport;
         setCoverage(report);
         setFailure(null);
-        if (report.status !== "searchable" && report.status !== "inaccessible") timer = setTimeout(poll, COVERAGE_POLL_MS);
+        if (!["searchable", "inaccessible", "removed"].includes(report.status)) timer = setTimeout(poll, COVERAGE_POLL_MS);
       } catch (err) {
         if (active) setFailure(err instanceof Error ? err.message : String(err));
       }
@@ -265,6 +268,7 @@ const STATUS_LABEL: Record<CoverageReport["status"], string> = {
   searchable_partial: "Searchable, index still growing",
   searchable: "Searchable, fully indexed",
   inaccessible: "No longer accessible on GitHub",
+  removed: "Index removed; register again to rebuild it",
 };
 
 const PHASE_LABEL: Record<StreamCoverage["phase"], string> = {

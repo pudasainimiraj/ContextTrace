@@ -4,8 +4,9 @@
  * registered: nothing searchable yet. searchable_partial: the first vectors are stored while
  * extraction, transform or embedding continues. searchable: every stream listed and nothing
  * is dirty or pending (sticky). inaccessible: GitHub no longer serves the repository.
+ * removed: the data was deleted (after 30 days unreachable, or by an operator); the row stays.
  */
-export type RepositoryStatus = "registered" | "searchable_partial" | "searchable" | "inaccessible";
+export type RepositoryStatus = "registered" | "searchable_partial" | "searchable" | "inaccessible" | "removed";
 
 export type RepositoryRecord = {
   id: number;
@@ -216,6 +217,7 @@ export type ServiceStatus = {
   budgets: BudgetState[];
   admissions: { open: boolean; reason: string | null }; // whether a new repository can be registered now
   protections: { turnstile: boolean; rate_limits: boolean; admin: boolean }; // what is enforced in this deployment
+  storage: { used: number; limit: number; level: "ok" | "warning" | "critical" }; // warning pauses admissions, backfills and rescans; critical pauses syncs too
   generated_at: string;
 };
 
