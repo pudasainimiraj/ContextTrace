@@ -4,6 +4,25 @@ import { JobError } from "./retry.ts";
 
 export const GITHUB_API_ROOT = "https://api.github.com";
 
+/**
+ * The extractor fetches only GitHub's REST API, and only under the job's own repository. A
+ * cursor is a URL read back from the database, so it is checked before every request.
+ */
+export function assertGitHubApiUrl(url: string, repo?: { owner: string; name: string }): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new JobError("invalid_cursor", "Fetch target is not a URL", { transient: false });
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== "api.github.com" || parsed.username || parsed.password) {
+    throw new JobError("invalid_cursor", "Fetch target is not GitHub's API", { transient: false });
+  }
+  if (repo && !parsed.pathname.startsWith(`/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/`)) {
+    throw new JobError("invalid_cursor", "Fetch target is outside the job's repository", { transient: false });
+  }
+}
+
 export type GitHubPage<T> = {
   items: T[];
   nextUrl: string | null; // from the Link header
@@ -20,6 +39,7 @@ export type GitHubOptions = { token?: string; fetch?: typeof globalThis.fetch; b
  * rate-reset wait; 404 and other 4xx raise permanent ones.
  */
 export async function githubGetPage<T>(url: string, opts: GitHubOptions = {}): Promise<GitHubPage<T>> {
+  assertGitHubApiUrl(url);
   const fetchImpl = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",

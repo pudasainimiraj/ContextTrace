@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord, SourceType } from "../shared/api.ts";
 import { getCheckpoint, saveCheckpoint, type StreamCheckpoint } from "./checkpoints.ts";
-import { GITHUB_API_ROOT, githubGetPage, type GitHubOptions } from "./github-rest.ts";
+import { assertGitHubApiUrl, GITHUB_API_ROOT, githubGetPage, type GitHubOptions } from "./github-rest.ts";
 import { JobError } from "./retry.ts";
 import { type Retirement, retireUnseenSources, type SourceDraft, upsertSources } from "./sources.ts";
 
@@ -149,6 +149,13 @@ export async function extractStream<T>(
   const pendingWalk = checkpoint?.cursor ? (checkpoint.rescan_started_at ? rescanKind(spec.stream) : backfillKind(spec.stream)) : null;
 
   for (;;) {
+    // Cursors come back from the database: a tampered one is dropped and the job fails.
+    try {
+      assertGitHubApiUrl(url, repo);
+    } catch (err) {
+      await save({ cursor: null, sync_cursor: null, rescan_started_at: null });
+      throw err;
+    }
     const page = await githubGetPage<T>(url, { token: ctx.token, fetch: ctx.fetch, budget: ctx.budget });
     totals.pages += 1;
     totals.bytes += page.bytes;

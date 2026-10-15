@@ -6,6 +6,7 @@ import type { EmbeddingClient } from "./embeddings.ts";
 import { BACKFILL_DELAY_SECONDS, extractStream, STREAM_KINDS } from "./extract.ts";
 import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
 import { nextJobKind } from "./pipeline.ts";
+import { storagePause, storageState } from "./maintenance.ts";
 import { getRepository, markRepositoryInaccessible } from "./repositories.ts";
 import { backoffSeconds, classifyError, JobError, MAX_ATTEMPTS } from "./retry.ts";
 import { TRANSFORM_JOB_KIND, transformRepository } from "./transform.ts";
@@ -53,6 +54,13 @@ export const runJob: JobRunner = async (job, ctx) => {
   const repository = await getRepository(ctx.db, job.repository_id);
   if (!repository) {
     throw new JobError("repository_missing", `Repository ${job.repository_id} is not registered`, { transient: false });
+  }
+  // Storage: backfills and rescans add data and wait at the warning level; syncs wait at critical.
+  if (ctx.budget) {
+    const storage = await storageState(ctx.budget);
+    if (storage.level === "critical" || (storage.level === "warning" && stream.role !== "fetch")) {
+      throw storagePause(storage, stream.role === "fetch" ? "syncing" : "backfilling");
+    }
   }
   let extracted;
   try {

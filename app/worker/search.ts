@@ -144,6 +144,8 @@ export function indexState(
         return null;
       case "inaccessible":
         return "The source repository is no longer accessible on GitHub; results reflect the last successful sync and may be stale.";
+      case "removed":
+        return "This repository's index was removed (after 30 days unreachable on GitHub, or by an operator); register it again to rebuild it.";
       case "searchable_partial":
         return `Partial index: ${stats.embedded} of ${stats.passages} passages are searchable while extraction and indexing continue; older discussions may be missing.`;
       default:

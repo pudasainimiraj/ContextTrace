@@ -1,5 +1,6 @@
+import { env } from "cloudflare:workers";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import { Budget, type BudgetResource } from "../worker/budget.ts";
 import type { PendingPassage } from "../worker/embed.ts";
 import { contentHash } from "../worker/passages.ts";
@@ -190,4 +191,14 @@ export function fakeExecutionContext(): ExecutionContext {
 export async function exhaustBudget(budget: Budget, resource: BudgetResource): Promise<void> {
   const state = (await budget.summary()).find((b) => b.resource === resource)!;
   await budget.settle(resource, state.limit - state.used);
+}
+
+/** The values that must never appear in a response: every secret and credential the Worker holds. */
+export const SECRET_ENV_NAMES = ["SUPABASE_SECRET_KEY", "WORKERS_AI_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "GITHUB_TOKEN", "ADMIN_TOKEN", "TURNSTILE_SECRET_KEY", "SUPABASE_PASSWORD"] as const;
+
+/** Fails when any configured secret value, or an extra marker, appears in the text. */
+export function expectNoSecrets(text: string, extraMarkers: string[] = []): void {
+  const values = SECRET_ENV_NAMES.map((name) => (env as unknown as Record<string, string | undefined>)[name]).filter((v): v is string => Boolean(v));
+  expect(values.length).toBeGreaterThan(0);
+  for (const secret of [...values, ...extraMarkers]) expect(text).not.toContain(secret);
 }

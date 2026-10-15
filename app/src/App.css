@@ -126,6 +126,11 @@ dd {
   border-color: var(--accent);
 }
 
+.turnstile {
+  margin-top: 12px;
+  min-height: 65px;
+}
+
 .results {
   list-style: none;
   padding: 0;

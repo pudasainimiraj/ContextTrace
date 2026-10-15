@@ -83,7 +83,7 @@ export async function reinstateRepository(db: SupabaseClient, repositoryId: numb
     .from("repositories")
     .update({ status: "registered", last_error: null, status_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", repositoryId)
-    .eq("status", "inaccessible");
+    .in("status", ["inaccessible", "removed"]);
   if (error) throw new Error(`update repositories failed: ${error.message}`);
   await refreshRepositoryStatus(db, repositoryId, transformVersion);
   return (await getRepository(db, repositoryId))!;

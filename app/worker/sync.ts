@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Budget } from "./budget.ts";
 import { BACKFILL_DELAY_SECONDS, fetchKind, rescanKind } from "./extract.ts";
 import { ensureQueuedJob, type JobQueue } from "./jobs.ts";
+import { storageState } from "./maintenance.ts";
 
 /** How old a stream's last completed run may be before the cron syncs it again. Hourly: a sync and its chain cost queue operations. */
 export const SYNC_INTERVAL_SECONDS = 60 * 60;
@@ -42,6 +43,7 @@ export async function dueStreams(db: SupabaseClient, options: SyncOptions = {}):
  */
 export async function scheduleSyncs(db: SupabaseClient, queue: JobQueue, options: SyncOptions = {}): Promise<SyncSchedule> {
   if (await queueBudgetLow(options.budget)) return { due: 0, queued: [], deferred: true };
+  if (options.budget && (await storageState(options.budget)).level === "critical") return { due: 0, queued: [], deferred: true };
   const due = await dueStreams(db, options);
   const queued: SyncSchedule["queued"] = [];
   for (const stream of due) {
@@ -69,6 +71,7 @@ export async function dueRescans(db: SupabaseClient, options: SyncOptions = {}):
  */
 export async function scheduleRescans(db: SupabaseClient, queue: JobQueue, options: SyncOptions = {}): Promise<SyncSchedule> {
   if (await queueBudgetLow(options.budget)) return { due: 0, queued: [], deferred: true };
+  if (options.budget && (await storageState(options.budget)).level !== "ok") return { due: 0, queued: [], deferred: true };
   const due = await dueRescans(db, options);
   const queued: SyncSchedule["queued"] = [];
   for (const stream of due) {

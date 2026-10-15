@@ -135,7 +135,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     const jobs = (repositoryId: number, body: unknown) =>
       exports.default.fetch(`http://localhost/api/repositories/${repositoryId}/jobs`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.ADMIN_TOKEN}` },
         body: JSON.stringify(body),
       });
 
@@ -180,7 +180,10 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     expect(otherHost.status).toBe(400);
     expect(await otherHost.json()).toMatchObject({ error: "invalid_input" });
 
-    expect(fakeGitHub).not.toHaveBeenCalled();
+    // No repository lookup happened; the local queue's page requests for earlier
+    // registrations may hit the stub meanwhile and are not lookups.
+    const lookups = fakeGitHub.mock.calls.filter(([input]) => /^\/repos\/[^/]+\/[^/]+$/.test(new URL(hrefOf(input)).pathname));
+    expect(lookups).toHaveLength(0);
   });
 
   it("reports a nonexistent repository", async () => {

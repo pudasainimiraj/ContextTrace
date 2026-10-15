@@ -1,22 +1,27 @@
 import type { ApiError, ServiceStatus, SourceType } from "../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { requireAdmin } from "./admin.ts";
 import { admissionState, findByFullName } from "./admission.ts";
-import { Budget, budgetExhausted as budgetExhaustedError, databaseSize, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
+import { Budget, budgetExhausted as budgetExhaustedError, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
 import { consumeJobMessage } from "./consumer.ts";
 import { getCoverage } from "./coverage.ts";
 import { lookupPublicRepository, type RepoLookup } from "./github-api.ts";
 import { parseRepositoryInput } from "./github-url.ts";
 import { createJob, enqueueJob, type JobMessage, type JobQueue, meteredQueue } from "./jobs.ts";
+import { maintain, removeRepository, storageState } from "./maintenance.ts";
 import { listPassages } from "./documents.ts";
 import { embeddingStats } from "./embed.ts";
 import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
-import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
+import { clientKey, rateLimitResponse } from "./ratelimit.ts";
+import { search } from "./search.ts";
 import { scheduleRescans, scheduleSyncs } from "./sync.ts";
 import { listSources } from "./sources.ts";
 import { createDb, type EgressMeter, getRepository, reinstateRepository, upsertRepository } from "./repositories.ts";
 import { TRANSFORM_VERSION } from "./transform.ts";
+import { verifyTurnstile } from "./turnstile.ts";
+import { validateJob, validateRegistration, validateSearch } from "./validate.ts";
 
 /** Everything a handler needs: a metered database client, the budget ledger and the metered queue. */
 type App = { db: SupabaseClient; budget: Budget; queue: JobQueue; meter: EgressMeter; env: Env };
@@ -38,6 +43,10 @@ export default {
     const app = createApp(env);
     try {
       return await route(request, app);
+    } catch (err) {
+      // Nothing about the failure reaches the client; the log has it.
+      console.error("unhandled request error", err);
+      return error(500, "internal_error", "Something went wrong on our side; the problem has been logged");
     } finally {
       settleEgress(app, ctx);
     }
@@ -50,9 +59,8 @@ export default {
       const reconciled = await reconcileJobs(app.db, app.queue);
       const syncs = await scheduleSyncs(app.db, app.queue, { budget: app.budget });
       const rescans = await scheduleRescans(app.db, app.queue, { budget: app.budget });
-      const storageBytes = await databaseSize(app.db);
-      await app.budget.gauge("storage_bytes", storageBytes);
-      console.log("cron", { reconciled, syncs, rescans, storageBytes });
+      const maintenance = await maintain(app.db, app.budget);
+      console.log("cron", { reconciled, syncs, rescans, maintenance });
     } finally {
       settleEgress(app, ctx);
     }
@@ -82,17 +90,34 @@ export default {
 async function route(request: Request, app: App): Promise<Response> {
   const { pathname } = new URL(request.url);
   const { method } = request;
+  const { env } = app;
 
   if (method === "GET" && pathname === "/api/health") return json({ ok: true });
+
+  // Expensive endpoints are limited per address; reads more loosely; admin routes by token.
+  if (method === "POST" && pathname === "/api/search") {
+    return (await rateLimitResponse(env.SEARCH_LIMITER, request, "search")) ?? searchRepository(request, app);
+  }
+  if (method === "POST" && pathname === "/api/repositories") {
+    return (await rateLimitResponse(env.REGISTER_LIMITER, request, "register")) ?? submitRepository(request, app);
+  }
+  const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
+  if (method === "POST" && jobsOf) {
+    return (await requireAdmin(request, env.ADMIN_TOKEN)) ?? createRepositoryJob(request, app, Number(jobsOf[1]));
+  }
+  const byIdDelete = /^\/api\/repositories\/(\d+)$/.exec(pathname);
+  if (method === "DELETE" && byIdDelete) {
+    return (await requireAdmin(request, env.ADMIN_TOKEN)) ?? deleteRepository(app, Number(byIdDelete[1]));
+  }
+  if (method === "GET") {
+    const limited = await rateLimitResponse(env.READ_LIMITER, request, "read");
+    if (limited) return limited;
+  }
+
   if (method === "GET" && pathname === "/api/status") return getServiceStatus(app);
-  if (method === "POST" && pathname === "/api/repositories") return submitRepository(request, app);
-  if (method === "POST" && pathname === "/api/search") return searchRepository(request, app);
 
   const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
   if (method === "GET" && byId) return getRepositoryById(app, Number(byId[1]));
-
-  const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
-  if (method === "POST" && jobsOf) return createRepositoryJob(request, app, Number(jobsOf[1]));
 
   const sourcesOf = /^\/api\/repositories\/(\d+)\/sources$/.exec(pathname);
   if (method === "GET" && sourcesOf) return listRepositorySources(app, Number(sourcesOf[1]), new URL(request.url));
@@ -111,26 +136,45 @@ async function route(request: Request, app: App): Promise<Response> {
 
 /** GET /api/status -> whether the service is pausing itself at a budget cap, and why. */
 async function getServiceStatus(app: App): Promise<Response> {
-  const [budgets, admissions] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget)]);
+  const [budgets, admissions, storage] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget), storageState(app.budget)]);
   const exhausted = budgets.filter((b) => b.paused);
   const body: ServiceStatus = {
     paused: exhausted.length > 0,
     reasons: exhausted.map((b) => `${b.resource}: ${b.used} of ${b.limit} used${b.resets_at ? `, resets at ${b.resets_at}` : ""}`),
     budgets,
     admissions,
+    protections: { turnstile: Boolean(app.env.TURNSTILE_SECRET_KEY), rate_limits: Boolean(app.env.SEARCH_LIMITER), admin: Boolean(app.env.ADMIN_TOKEN) },
+    storage,
     generated_at: new Date().toISOString(),
   };
-  return json(body, { headers: { "Cache-Control": "no-store" } });
+  return json(body);
 }
 
 /** POST /api/repositories  body: { url } -> 201 new | 200 already registered */
 async function submitRepository(request: Request, app: App): Promise<Response> {
   const { db, env, budget } = app;
   const body = await readJson(request);
-  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
-  const url = typeof body === "object" && body !== null ? (body as { url?: unknown }).url : undefined;
+  if (body instanceof Response) return body;
+  const input = validateRegistration(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
+  const { url, turnstileToken } = input.value;
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
+
+  // Turnstile, when configured: the token is checked before anything else is spent.
+  if (env.TURNSTILE_SECRET_KEY) {
+    if (!turnstileToken) return error(403, "verification_failed", "Complete the Turnstile check and send its token as turnstileToken");
+    let verified;
+    try {
+      verified = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, clientKey(request));
+    } catch (err) {
+      console.error("turnstile verification unavailable", err);
+      return error(503, "verification_unavailable", "The verification service could not be reached; try again shortly", { "Retry-After": "30" });
+    }
+    if (!verified.success) {
+      return error(403, "verification_failed", `Turnstile rejected the token (${verified.errorCodes.join(", ") || "no reason given"}); reload and try again`);
+    }
+  }
 
   // When admissions are closed (storage warning, repository cap) only a repository that is
   // already registered gets through, and it is served as a resubmission.
@@ -159,7 +203,7 @@ async function submitRepository(request: Request, app: App): Promise<Response> {
   // A newly registered repository starts its extraction streams at once. One that GitHub had
   // stopped serving is public again: clear the mark and catch up through the same streams.
   if (created) await startExtraction(db, app.queue, row.id);
-  if (row.status === "inaccessible") {
+  if (row.status === "inaccessible" || row.status === "removed") {
     row = await reinstateRepository(db, row.id, TRANSFORM_VERSION);
     await startExtraction(db, app.queue, row.id);
   }
@@ -193,13 +237,11 @@ async function listRepositorySources({ db }: App, repositoryId: number, url: URL
 /** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */
 async function createRepositoryJob(request: Request, { db, queue }: App, repositoryId: number): Promise<Response> {
   const body = await readJson(request);
-  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
-  const kind = typeof body === "object" && body !== null ? (body as { kind?: unknown }).kind : undefined;
-  if (typeof kind !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(kind)) {
-    return error(400, "invalid_input", "kind must be a snake_case identifier");
-  }
+  if (body instanceof Response) return body;
+  const input = validateJob(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
   if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
-  const created = await createJob(db, repositoryId, kind);
+  const created = await createJob(db, repositoryId, input.value.kind);
   const job = await enqueueJob(db, queue, created.id);
   if (!job) throw new Error(`job ${created.id} could not be enqueued`);
   return json(job, { status: 202 });
@@ -229,16 +271,10 @@ async function getEmbeddingStats({ db }: App, repositoryId: number): Promise<Res
 /** POST /api/search  body: { repositoryId, query, limit? } -> evidence cards, query embedded on the server */
 async function searchRepository(request: Request, { db, env, budget }: App): Promise<Response> {
   const body = await readJson(request);
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return error(400, "invalid_input", "Request body must be a JSON object");
-  }
-  const { repositoryId, query, limit } = body as { repositoryId?: unknown; query?: unknown; limit?: unknown };
-  if (!isPositiveInt(repositoryId)) return error(400, "invalid_input", "repositoryId must be a positive integer");
-  if (typeof query !== "string" || query.trim() === "") return error(400, "invalid_input", "query must be a non-empty string");
-  if (query.length > MAX_QUERY_CHARS) return error(400, "invalid_input", `query must be at most ${MAX_QUERY_CHARS} characters`);
-  if (limit !== undefined && (!isPositiveInt(limit) || limit > SEARCH_LIMIT_MAX)) {
-    return error(400, "invalid_input", `limit must be an integer from 1 to ${SEARCH_LIMIT_MAX}`);
-  }
+  if (body instanceof Response) return body;
+  const input = validateSearch(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
+  const { repositoryId, query, limit } = input.value;
 
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
@@ -251,15 +287,19 @@ async function searchRepository(request: Request, { db, env, budget }: App): Pro
   return json(await search({ db, embeddings: createEmbeddingClient(env), budget }, { repository, query, limit }));
 }
 
-function isPositiveInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
 /** GET /api/repositories/:id/coverage -> counts, stream progress, high-water marks and sync times */
 async function getRepositoryCoverage({ db }: App, repositoryId: number): Promise<Response> {
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
   return json(await getCoverage(db, repository));
+}
+
+/** DELETE /api/repositories/:id (admin) -> removes everything the repository holds; the row stays as a tombstone */
+async function deleteRepository({ db }: App, repositoryId: number): Promise<Response> {
+  const repository = await getRepository(db, repositoryId);
+  if (!repository) return error(404, "not_found", "Repository is not registered");
+  const removal = await removeRepository(db, repositoryId, "removed by an operator");
+  return json({ repository_id: repositoryId, status: "removed", removed: removal });
 }
 
 /** GET /api/repositories/:id */
@@ -293,20 +333,40 @@ function lookupError(lookup: Exclude<RepoLookup, { kind: "ok" }>): Response {
   }
 }
 
-/** Parsed JSON body, or undefined when the body is not valid JSON. */
-async function readJson(request: Request): Promise<unknown> {
+/** Request bodies are small JSON documents; anything larger is refused before it is parsed. */
+export const MAX_BODY_BYTES = 8192;
+
+/**
+ * The parsed JSON body, or the error response to send instead: 415 for a body that is not
+ * declared as JSON, 413 past MAX_BODY_BYTES, 400 when it does not parse.
+ */
+async function readJson(request: Request): Promise<unknown | Response> {
+  const type = request.headers.get("content-type") ?? "";
+  if (!/^application\/json\b/i.test(type)) return error(415, "unsupported_media_type", "Request body must be application/json");
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
+  let text: string;
   try {
-    return await request.json();
+    text = await request.text();
   } catch {
-    return undefined;
+    return error(400, "invalid_input", "Request body could not be read");
+  }
+  if (text.length > MAX_BODY_BYTES) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return error(400, "invalid_input", "Request body must be JSON");
   }
 }
 
+/** Every API response: JSON, never cached, never sniffed. */
+const API_HEADERS = { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" };
+
 function json(body: unknown, init?: ResponseInit): Response {
-  return Response.json(body, init);
+  return Response.json(body, { ...init, headers: { ...API_HEADERS, ...(init?.headers as Record<string, string> | undefined) } });
 }
 
 function error(status: number, code: string, message: string, headers?: Record<string, string>): Response {
   const body: ApiError = { error: code, message };
-  return Response.json(body, { status, headers });
+  return Response.json(body, { status, headers: { ...API_HEADERS, ...headers } });
 }
