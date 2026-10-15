@@ -12,6 +12,7 @@
     "preview": "npm run build && vite preview",
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types --env-file .env.example",
+    "eval": "node eval/run.ts",
     "db:push": "supabase db push --workdir .. --db-url \"$SUPABASE_DB_URL\""
   },
   "dependencies": {

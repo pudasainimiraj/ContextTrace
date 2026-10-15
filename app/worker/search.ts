@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { RepositoryRecord, SearchConfidence, SearchIndexState, SearchMode, SearchResponse } from "../shared/api.ts";
+import type { RepositoryRecord, SearchConfidence, SearchIndexState, SearchMode, SearchModeRequest, SearchResponse } from "../shared/api.ts";
 import { type Budget, milliNeuronsFor, QUERY_RESERVE_MILLI_NEURONS } from "./budget.ts";
 import { listCheckpoints } from "./checkpoints.ts";
 import { embeddingStats } from "./embed.ts";
@@ -23,7 +23,7 @@ export const SCORE_HIGH = 0.8;
 export const SCORE_LOW = 0.7;
 
 export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient; budget?: Budget };
-export type SearchRequest = { repository: RepositoryRecord; query: string; limit?: number };
+export type SearchRequest = { repository: RepositoryRecord; query: string; limit?: number; mode?: SearchModeRequest };
 
 export type SearchMatch = {
   passage_id: string;
@@ -63,19 +63,24 @@ export async function embedQuery(
 }
 
 /**
- * One search. The query is embedded and ranked against the repository's vectors; when the
- * best match is not close, or the model is unavailable, the keyword baseline runs instead.
- * Whatever is shown comes with a mode, a confidence and a message that says why, so a weak
- * or missing answer is never dressed up as a supported one.
+ * One search. In auto mode the query is embedded and ranked against the repository's
+ * vectors; when the best match is not close, or the model is unavailable, the keyword
+ * baseline runs instead. Whatever is shown comes with a mode, a confidence and a message
+ * that says why, so a weak or missing answer is never dressed up as a supported one. A
+ * forced mode (semantic or keyword) runs that retrieval alone and returns whatever it
+ * found with the same confidence scale, for evaluation and for callers who know better.
  */
 export async function search(ctx: SearchContext, request: SearchRequest): Promise<SearchResponse> {
   const { repository } = request;
   const repositoryId = repository.id;
   const query = request.query.trim();
   const limit = Math.min(Math.max(request.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
+  const requested: SearchModeRequest = request.mode ?? "auto";
 
   const [semantic, stats, checkpoints] = await Promise.all([
-    semanticSearch(ctx, repositoryId, query, limit),
+    requested === "keyword"
+      ? Promise.resolve({ hits: [] as SearchMatch[], embedMs: null, error: null, resetsAt: null })
+      : semanticSearch(ctx, repositoryId, query, limit),
     embeddingStats(ctx.db, repositoryId),
     listCheckpoints(ctx.db, repositoryId),
   ]);
@@ -91,7 +96,14 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
   let confidence: SearchConfidence;
   let message: string | null;
   let hits: SearchMatch[];
-  if (top >= SCORE_HIGH) {
+  if (requested === "semantic") {
+    [mode, hits, message] = ["semantic", semantic.hits, unavailable];
+    confidence = top >= SCORE_HIGH ? "high" : top >= SCORE_LOW ? "low" : "none";
+  } else if (requested === "keyword") {
+    const keyword = await searchKeyword(ctx.db, repositoryId, query, limit);
+    [mode, hits, message] = ["keyword", keyword, null];
+    confidence = keyword.length > 0 ? "low" : "none";
+  } else if (top >= SCORE_HIGH) {
     [mode, confidence, message, hits] = ["semantic", "high", null, semantic.hits];
   } else {
     const keyword = await searchKeyword(ctx.db, repositoryId, query, limit);
@@ -125,6 +137,7 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
     repository_id: repositoryId,
     query,
     limit,
+    requested_mode: requested,
     mode,
     confidence,
     message,

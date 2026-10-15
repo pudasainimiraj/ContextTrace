@@ -26,17 +26,22 @@ export function validateRegistration(body: unknown): Valid<{ url: unknown; turns
   return { ok: true, value: { url: o.url, turnstileToken: typeof token === "string" ? token : null } };
 }
 
-export function validateSearch(body: unknown): Valid<{ repositoryId: number; query: string; limit?: number }> {
+const SEARCH_MODES = ["auto", "semantic", "keyword"] as const;
+
+export function validateSearch(body: unknown): Valid<{ repositoryId: number; query: string; limit?: number; mode?: (typeof SEARCH_MODES)[number] }> {
   const o = asObject(body);
   if (!o) return { ok: false, message: "Request body must be a JSON object" };
-  const { repositoryId, query, limit } = o;
+  const { repositoryId, query, limit, mode } = o;
+  if (mode !== undefined && !SEARCH_MODES.includes(mode as (typeof SEARCH_MODES)[number])) {
+    return { ok: false, message: `mode must be one of ${SEARCH_MODES.join(", ")}` };
+  }
   if (!isPositiveInt(repositoryId)) return { ok: false, message: "repositoryId must be a positive integer" };
   if (typeof query !== "string" || query.trim() === "") return { ok: false, message: "query must be a non-empty string" };
   if (query.length > MAX_QUERY_CHARS) return { ok: false, message: `query must be at most ${MAX_QUERY_CHARS} characters` };
   if (limit !== undefined && (!isPositiveInt(limit) || limit > SEARCH_LIMIT_MAX)) {
     return { ok: false, message: `limit must be an integer from 1 to ${SEARCH_LIMIT_MAX}` };
   }
-  return { ok: true, value: { repositoryId, query, limit } };
+  return { ok: true, value: { repositoryId, query, limit, mode: mode as (typeof SEARCH_MODES)[number] | undefined } };
 }
 
 export function validateJob(body: unknown): Valid<{ kind: string }> {

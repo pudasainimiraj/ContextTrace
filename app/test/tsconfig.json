@@ -11,6 +11,5 @@
   "include": [
     "./**/*.ts",
     "../worker/**/*.ts",
-    "../shared/**/*.ts"
-  ]
+    "../shared/**/*.ts", "../eval/metrics.ts"]
 }

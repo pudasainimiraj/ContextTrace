@@ -277,6 +277,35 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY || !env.CLOUDFLARE_ACCOUNT_ID || !env.W
   });
 });
 
+describe.skipIf(!env.SUPABASE_SECRET_KEY || !env.CLOUDFLARE_ACCOUNT_ID || !env.WORKERS_AI_API_TOKEN)("forced modes", () => {
+  it("runs keyword search alone without calling the model, and semantic search alone whatever the score", async () => {
+    const keyword = (await (await post({ repositoryId: REPO, query: "daylight saving", mode: "keyword" })).json()) as SearchResponse;
+    expect(keyword).toMatchObject({ requested_mode: "keyword", mode: "keyword", confidence: "low", semantic_error: null, embed_ms: null, message: null });
+    expect(keyword.results.map((r) => r.passage_id)).toEqual([`github:${REPO}:issue:1:body:1`]);
+    expect(aiCalls).toEqual([]);
+    const empty = (await (await post({ repositoryId: REPO, query: "zebra giraffe", mode: "keyword" })).json()) as SearchResponse;
+    expect(empty).toMatchObject({ mode: "keyword", confidence: "none", results: [] });
+
+    aiRespond = respondWith(vectorNear(TEXTS[2], 0.5));
+    const weak = (await (await post({ repositoryId: REPO, query: "clarity", mode: "semantic" })).json()) as SearchResponse;
+    expect(weak).toMatchObject({ requested_mode: "semantic", mode: "semantic", confidence: "none", message: null });
+    expect(weak.results[0]).toMatchObject({ passage_id: `github:${REPO}:issue:1:body:2`, match: "semantic" });
+    expect(weak.results[0].score).toBeCloseTo(0.5, 3);
+    expect(aiCalls).toHaveLength(1);
+
+    const auto = (await (await post({ repositoryId: REPO, query: "clarity", mode: "auto" })).json()) as SearchResponse;
+    expect(auto).toMatchObject({ requested_mode: "auto", mode: "keyword" }); // auto hides the weak semantic hit behind the keyword match
+  });
+
+  it("rejects an unknown mode", async () => {
+    for (const mode of ["hybrid", 1, null]) {
+      const res = await post({ repositoryId: REPO, query: "clarity", mode });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as ApiError).message).toMatch(/mode must be one of auto, semantic, keyword/);
+    }
+  });
+});
+
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("search without an embedding client", () => {
   it("serves keyword matches and reports ai_not_configured instead of guessing a vector", async () => {
     const response = await search({ db }, { repository: (await getRepository(db, REPO))!, query: "sourdough" });

@@ -274,7 +274,7 @@ async function searchRepository(request: Request, { db, env, budget }: App): Pro
   if (body instanceof Response) return body;
   const input = validateSearch(body);
   if (!input.ok) return error(400, "invalid_input", input.message);
-  const { repositoryId, query, limit } = input.value;
+  const { repositoryId, query, limit, mode } = input.value;
 
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
@@ -284,7 +284,7 @@ async function searchRepository(request: Request, { db, env, budget }: App): Pro
       "Retry-After": retryAfterHeader(budgetExhaustedError("searches", admission)),
     });
   }
-  return json(await search({ db, embeddings: createEmbeddingClient(env), budget }, { repository, query, limit }));
+  return json(await search({ db, embeddings: createEmbeddingClient(env), budget }, { repository, query, limit, mode }));
 }
 
 /** GET /api/repositories/:id/coverage -> counts, stream progress, high-water marks and sync times */

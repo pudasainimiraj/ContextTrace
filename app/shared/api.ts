@@ -134,6 +134,8 @@ export type EvidenceCard = {
 
 export type EvidenceMatch = "semantic" | "keyword";
 export type SearchMode = "semantic" | "keyword" | "none";
+/** What the caller asked for: auto (the default) decides by score; the forced modes run one retrieval only. */
+export type SearchModeRequest = "auto" | "semantic" | "keyword";
 export type SearchConfidence = "high" | "low" | "none";
 
 /** How much of the repository the search can see, and the warning to show when it is not all of it. */
@@ -151,6 +153,7 @@ export type SearchResponse = {
   repository_id: number;
   query: string; // as searched, trimmed
   limit: number;
+  requested_mode: SearchModeRequest;
   mode: SearchMode; // where the results come from
   confidence: SearchConfidence; // high: close semantic matches; low: weak or keyword-only; none: nothing shown
   message: string | null; // what the reader should know when confidence is not high
