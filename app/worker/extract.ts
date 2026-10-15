@@ -17,6 +17,12 @@ export const BACKFILL_PAGES_PER_RUN = 3;
 export const BACKFILL_DELAY_SECONDS = 10;
 export const MAX_PAGES_PER_RUN = 5;
 export const PER_PAGE = 100;
+/**
+ * Items a stream stores at most. A head or backfill run that reaches it stops, marks the
+ * stream complete and capped, and coverage and search say so: the index never claims more
+ * than it holds. Syncs are not capped: they only read what changed.
+ */
+export const MAX_ITEMS_PER_STREAM = 5000;
 /** A sync lists since the high-water mark minus this, so items re-dated or served late around the mark are seen again. */
 export const SYNC_OVERLAP_SECONDS = 300;
 /** Stop paging when fewer requests than this remain before the rate limit resets. */
@@ -33,7 +39,7 @@ export type StreamSpec<T> = {
   toSource: (item: T, repositoryId: number, jobId: number) => SourceDraft;
 };
 
-export type ExtractContext = GitHubOptions & { db: SupabaseClient };
+export type ExtractContext = GitHubOptions & { db: SupabaseClient; maxItemsPerStream?: number };
 
 /**
  * fetch_* jobs run the head pass, then syncs; backfill_* jobs continue the descending
@@ -47,6 +53,7 @@ export type ExtractResult = {
   phase: StreamPhase;
   followUpKind: string | null; // a low-priority job kind that must be waiting after this run
   retired?: Retirement; // what a completed rescan removed
+  capped?: boolean; // the run stopped at MAX_ITEMS_PER_STREAM
   pages: number;
   records: number; // items received from GitHub
   bytes: number; // response bodies received
@@ -163,6 +170,18 @@ export async function extractStream<T>(
         `GitHub rate limit nearly exhausted (${page.remaining} requests left); resuming after the reset`,
         { transient: true, retryAfterSeconds: wait },
       );
+    }
+    // The cap: the listing is treated as finished here. A capped rescan retires nothing,
+    // because what lies beyond the cap was never seen.
+    const stored = (checkpoint?.items_fetched ?? 0) + totals.records;
+    const cap = ctx.maxItemsPerStream ?? MAX_ITEMS_PER_STREAM;
+    if (page.nextUrl && phase !== "sync" && stored >= cap) {
+      await save(
+        phase === "rescan"
+          ? { cursor: null, rescan_started_at: null, last_rescan_at: now(), capped_at: now() }
+          : { cursor: null, head_done_at: checkpoint?.head_done_at ?? now(), backfill_done_at: now(), capped_at: now(), ...(phase === "head" ? { last_item_at: mark(), last_synced_at: now() } : {}) },
+      );
+      return { done: true, phase, followUpKind: null, capped: true, ...totals };
     }
     if (page.nextUrl && totals.pages < budget) {
       url = page.nextUrl;

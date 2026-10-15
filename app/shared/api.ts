@@ -141,6 +141,7 @@ export type SearchIndexState = {
   partial: boolean; // true unless the status is searchable
   embedded: number; // passages with a current vector
   pending: number; // passages waiting for one
+  capped_streams: string[]; // streams that stopped at the item cap
   warning: string | null;
 };
 
@@ -174,6 +175,8 @@ export type StreamCoverage = {
   sync_in_progress: boolean; // a sync left a cursor behind
   rescan_in_progress: boolean;
   last_rescan_at: string | null; // when deleted sources were last reconciled
+  capped: boolean; // stopped at the per-stream item cap; counts as complete, older items are not indexed
+  capped_at: string | null;
   pages_fetched: number;
   items_fetched: number;
 };
@@ -211,6 +214,7 @@ export type ServiceStatus = {
   paused: boolean;
   reasons: string[]; // one line per exhausted budget
   budgets: BudgetState[];
+  admissions: { open: boolean; reason: string | null }; // whether a new repository can be registered now
   generated_at: string;
 };
 

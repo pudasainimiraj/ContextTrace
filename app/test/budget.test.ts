@@ -186,7 +186,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("metered calls", () => {
     const refused = await search({ db, embeddings: new FakeEmbeddingClient(), budget }, { repository, query: "queues" });
     expect(refused).toMatchObject({ mode: "keyword", semantic_error: "budget_exhausted" });
     expect(refused.results.map((r) => r.excerpt)).toEqual([TEXTS[1]]);
-    expect(refused.message).toMatch(/unavailable \(budget_exhausted\)/);
+    expect(refused.message).toMatch(/^Semantic search is paused until .* \(inference budget reached\)/);
   });
 });
 

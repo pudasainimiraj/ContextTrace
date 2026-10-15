@@ -1,5 +1,6 @@
 import type { ApiError, ServiceStatus, SourceType } from "../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { admissionState, findByFullName } from "./admission.ts";
 import { Budget, budgetExhausted as budgetExhaustedError, databaseSize, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
 import { consumeJobMessage } from "./consumer.ts";
 import { getCoverage } from "./coverage.ts";
@@ -47,8 +48,8 @@ export default {
     const app = createApp(env);
     try {
       const reconciled = await reconcileJobs(app.db, app.queue);
-      const syncs = await scheduleSyncs(app.db, app.queue);
-      const rescans = await scheduleRescans(app.db, app.queue);
+      const syncs = await scheduleSyncs(app.db, app.queue, { budget: app.budget });
+      const rescans = await scheduleRescans(app.db, app.queue, { budget: app.budget });
       const storageBytes = await databaseSize(app.db);
       await app.budget.gauge("storage_bytes", storageBytes);
       console.log("cron", { reconciled, syncs, rescans, storageBytes });
@@ -110,12 +111,13 @@ async function route(request: Request, app: App): Promise<Response> {
 
 /** GET /api/status -> whether the service is pausing itself at a budget cap, and why. */
 async function getServiceStatus(app: App): Promise<Response> {
-  const budgets = await app.budget.summary();
+  const [budgets, admissions] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget)]);
   const exhausted = budgets.filter((b) => b.paused);
   const body: ServiceStatus = {
     paused: exhausted.length > 0,
     reasons: exhausted.map((b) => `${b.resource}: ${b.used} of ${b.limit} used${b.resets_at ? `, resets at ${b.resets_at}` : ""}`),
     budgets,
+    admissions,
     generated_at: new Date().toISOString(),
   };
   return json(body, { headers: { "Cache-Control": "no-store" } });
@@ -130,6 +132,12 @@ async function submitRepository(request: Request, app: App): Promise<Response> {
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
 
+  // When admissions are closed (storage warning, repository cap) only a repository that is
+  // already registered gets through, and it is served as a resubmission.
+  const admissions = await admissionState(db, budget);
+  if (!admissions.open && !(await findByFullName(db, `${parsed.owner}/${parsed.name}`))) {
+    return error(503, "admissions_paused", admissions.reason ?? "New repositories are not accepted right now", { "Retry-After": "3600" });
+  }
   // A registration is reserved before the lookup, so a refused one costs no GitHub request;
   // a lookup that does not register anything gives the reservation back.
   const admission = await budget.reserve("registrations", 1);

@@ -283,7 +283,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("two repositories on one queue", () =>
       const found = await search({ db, embeddings }, { repository: large, query: edited.body });
       expect(found).toMatchObject({ mode: "semantic", confidence: "high" });
       expect(found.results[0]).toMatchObject({ number: 17, excerpt: edited.body, source_url: `${web("large")}/issues/17` });
-      expect(found.index).toEqual({ status: "searchable", partial: false, embedded: found.index.embedded, pending: 0, warning: null });
+      expect(found.index).toEqual({ status: "searchable", partial: false, embedded: found.index.embedded, pending: 0, capped_streams: [], warning: null });
       const issues = (await getCoverage(db, large)).streams.find((s) => s.stream === "issues")!;
       expect(toGitHubTimestamp(issues.high_water_mark!)).toBe(at(500));
     },

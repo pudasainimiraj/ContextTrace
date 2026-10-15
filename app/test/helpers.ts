@@ -185,3 +185,9 @@ export async function dropBudget(db: SupabaseClient, scope: string): Promise<voi
 export function fakeExecutionContext(): ExecutionContext {
   return { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
 }
+
+/** Fills a resource of a scoped ledger up to its limit. */
+export async function exhaustBudget(budget: Budget, resource: BudgetResource): Promise<void> {
+  const state = (await budget.summary()).find((b) => b.resource === resource)!;
+  await budget.settle(resource, state.limit - state.used);
+}

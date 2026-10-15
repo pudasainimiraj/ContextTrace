@@ -64,6 +64,8 @@ export function streamCoverage(stream: string, checkpoint: StreamCheckpoint | un
     sync_in_progress: Boolean(checkpoint?.sync_cursor),
     rescan_in_progress: Boolean(checkpoint?.rescan_started_at),
     last_rescan_at: checkpoint?.last_rescan_at ?? null,
+    capped: Boolean(checkpoint?.capped_at),
+    capped_at: checkpoint?.capped_at ?? null,
     pages_fetched: checkpoint?.pages_fetched ?? 0,
     items_fetched: checkpoint?.items_fetched ?? 0,
   };

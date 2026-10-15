@@ -216,10 +216,10 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("rescans", () => {
     expect(paused.cursor).toContain("page=4");
     expect(paused.rescan_started_at).not.toBeNull();
     const sends = first.queue.send.mock.calls.map(([m, o]) => [m.kind, o?.delaySeconds ?? 0]);
+    // The run changed nothing, so no transform is queued; only the delayed continuation.
     expect(sends).toEqual([
       ["rescan_issue_comments", 0],
       ["rescan_issue_comments", BACKFILL_DELAY_SECONDS],
-      ["transform_passages", 0],
     ]);
 
     // A backfill job delivered now finds the cursor owned by the rescan and does nothing.

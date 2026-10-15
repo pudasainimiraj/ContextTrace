@@ -10,6 +10,9 @@ export type JobMessage = {
   generation: number;
 };
 
+/** Longest delay a message is sent with: half the free plan's 24-hour retention. Longer waits rely on the reconcile cron. */
+export const MAX_MESSAGE_DELAY_SECONDS = 12 * 3600;
+
 /** The part of a Cloudflare Queue producer binding that enqueueJob uses. */
 export type JobQueue = { send(message: JobMessage, options?: { delaySeconds?: number }): Promise<unknown> };
 
@@ -47,8 +50,9 @@ export async function enqueueJob(
   if (!data) return null;
   const job = data as JobRecord;
   const message: JobMessage = { jobId: job.id, repoId: job.repository_id, kind: job.kind, generation: job.generation };
+  const delaySeconds = Math.min(options.delaySeconds ?? 0, MAX_MESSAGE_DELAY_SECONDS);
   try {
-    await queue.send(message, options.delaySeconds ? { delaySeconds: options.delaySeconds } : undefined);
+    await queue.send(message, delaySeconds ? { delaySeconds } : undefined);
   } catch (err) {
     if (!isBudgetExhausted(err)) throw err;
     console.warn(`job ${job.id} stays queued without a message: ${err.message}`);
