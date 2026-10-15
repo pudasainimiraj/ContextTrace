@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BudgetState } from "../shared/api.ts";
 import { NEURONS_PER_MILLION_TOKENS } from "./embeddings.ts";
-import { JobError } from "./retry.ts";
+import { JobError, dbError } from "./retry.ts";
 
 /**
  * Metered resources. Every budget sits at 80% of a free allowance (see the migration), so a
@@ -52,7 +52,7 @@ export class Budget {
   /** Atomically reserves `amount`; refused when it would cross the limit, with the row unchanged. */
   async reserve(resource: BudgetResource, amount: number): Promise<Reservation> {
     const { data, error } = await this.db.rpc("reserve_budget", { p_scope: this.scope, p_resource: resource, p_amount: amount }).single();
-    if (error) throw new Error(`reserve_budget failed: ${error.message}`);
+    if (error) throw dbError("reserve_budget", error);
     const row = data as { allowed: boolean; used: number | string; limit_amount: number | string; resets_at: string | null };
     return { allowed: row.allowed, used: Number(row.used), limit: Number(row.limit_amount), resetsAt: row.resets_at };
   }
@@ -68,20 +68,20 @@ export class Budget {
   async settle(resource: BudgetResource, delta: number): Promise<number> {
     if (delta === 0) return Number.NaN;
     const { data, error } = await this.db.rpc("settle_budget", { p_scope: this.scope, p_resource: resource, p_delta: Math.round(delta) });
-    if (error) throw new Error(`settle_budget failed: ${error.message}`);
+    if (error) throw dbError("settle_budget", error);
     return Number(data);
   }
 
   /** Records a measured value for a gauge resource (storage). */
   async gauge(resource: BudgetResource, value: number): Promise<void> {
     const { error } = await this.db.rpc("set_budget_gauge", { p_scope: this.scope, p_resource: resource, p_value: Math.round(value) });
-    if (error) throw new Error(`set_budget_gauge failed: ${error.message}`);
+    if (error) throw dbError("set_budget_gauge", error);
   }
 
   /** Every resource of the scope as it stands now; a passed window reads as empty. */
   async summary(): Promise<BudgetState[]> {
     const { data, error } = await this.db.rpc("budget_status", { p_scope: this.scope });
-    if (error) throw new Error(`budget_status failed: ${error.message}`);
+    if (error) throw dbError("budget_status", error);
     return ((data ?? []) as { resource: string; period: string; used: number | string; limit_amount: number | string; resets_at: string | null }[]).map(
       (row) => {
         const used = Number(row.used);
@@ -124,6 +124,6 @@ export function retryAfterHeader(err: JobError): string {
 /** Database size in bytes, for the storage gauge. */
 export async function databaseSize(db: SupabaseClient): Promise<number> {
   const { data, error } = await db.rpc("database_size");
-  if (error) throw new Error(`database_size failed: ${error.message}`);
+  if (error) throw dbError("database_size", error);
   return Number(data);
 }

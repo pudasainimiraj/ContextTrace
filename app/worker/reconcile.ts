@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobRecord } from "../shared/api.ts";
 import { enqueueJob, type JobQueue } from "./jobs.ts";
-import { MAX_ATTEMPTS } from "./retry.ts";
+import { MAX_ATTEMPTS, dbError } from "./retry.ts";
 
 /** How long a due retry or a queued job may wait for its message before it is resent. */
 export const RECONCILE_GRACE_SECONDS = 120;
@@ -25,7 +25,7 @@ export async function reconcileJobs(
     p_grace_seconds: options.graceSeconds ?? RECONCILE_GRACE_SECONDS,
     p_repository_id: options.repositoryId ?? null,
   });
-  if (error) throw new Error(`reconcile_jobs failed: ${error.message}`);
+  if (error) throw dbError("reconcile_jobs", error);
 
   const result: Reconciliation = { requeued: [], failed: [] };
   for (const job of (data ?? []) as JobRecord[]) {

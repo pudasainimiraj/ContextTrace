@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 
 /**
  * Where a stream stands, per repository. The descending (newest first) listing that the
@@ -39,17 +40,17 @@ export async function getCheckpoint(
     .eq("repository_id", repositoryId)
     .eq("stream", stream)
     .maybeSingle();
-  if (error) throw new Error(`select stream_checkpoints failed: ${error.message}`);
+  if (error) throw dbError("select stream_checkpoints", error);
   return data as StreamCheckpoint | null;
 }
 
 export async function saveCheckpoint(db: SupabaseClient, checkpoint: CheckpointPatch): Promise<void> {
   const { error } = await db.from("stream_checkpoints").upsert(checkpoint);
-  if (error) throw new Error(`upsert stream_checkpoints failed: ${error.message}`);
+  if (error) throw dbError("upsert stream_checkpoints", error);
 }
 
 export async function listCheckpoints(db: SupabaseClient, repositoryId: number): Promise<StreamCheckpoint[]> {
   const { data, error } = await db.from("stream_checkpoints").select("*").eq("repository_id", repositoryId).order("stream");
-  if (error) throw new Error(`select stream_checkpoints failed: ${error.message}`);
+  if (error) throw dbError("select stream_checkpoints", error);
   return (data ?? []) as StreamCheckpoint[];
 }

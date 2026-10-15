@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { STORAGE_WARN_RATIO } from "./admission.ts";
 import { type Budget, databaseSize } from "./budget.ts";
-import { JobError } from "./retry.ts";
+import { JobError, dbError } from "./retry.ts";
 
 /** Finished jobs (and their transitions) are kept this long; the newest per repository and kind is always kept. */
 export const JOB_RETENTION_DAYS = 14;
@@ -42,7 +42,7 @@ export function storagePause(state: StorageState, work: string): JobError {
 /** Deletes everything a repository holds and leaves a tombstone row; open jobs are cancelled. */
 export async function removeRepository(db: SupabaseClient, repositoryId: number, reason: string): Promise<Removal> {
   const { data, error } = await db.rpc("remove_repository", { p_repository_id: repositoryId, p_reason: reason }).single();
-  if (error) throw new Error(`remove_repository failed: ${error.message}`);
+  if (error) throw dbError("remove_repository", error);
   return data as Removal;
 }
 
@@ -63,7 +63,7 @@ export async function maintain(db: SupabaseClient, budget: Budget, options: Main
   const usagePurged = await purge(db, "purge_embedding_usage", options.usageDays ?? USAGE_RETENTION_DAYS, options.repositoryId);
 
   const { data, error } = await db.rpc("stale_inaccessible_repositories", { p_days: options.inaccessibleDays ?? INACCESSIBLE_RETENTION_DAYS, p_repository_id: options.repositoryId ?? null });
-  if (error) throw new Error(`stale_inaccessible_repositories failed: ${error.message}`);
+  if (error) throw dbError("stale_inaccessible_repositories", error);
   const removed: number[] = [];
   for (const row of (data ?? []) as (number | { stale_inaccessible_repositories: number })[]) {
     const id = typeof row === "number" ? row : row.stale_inaccessible_repositories;

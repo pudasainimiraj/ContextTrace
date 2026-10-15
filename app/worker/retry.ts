@@ -19,6 +19,25 @@ export class JobError extends Error {
 
 export type Failure = { code: string; message: string; transient: boolean; retryAfterSeconds?: number };
 
+/** What supabase-js hands back when a call fails. */
+export type DbFailure = { message: string; code?: string | null; details?: string | null; hint?: string | null };
+
+/**
+ * A failed database call as a JobError. The database being unavailable (connection, timeout,
+ * PostgREST or gateway trouble, serialisation conflicts) is transient and the job retries;
+ * data the database refuses (constraint violations, bad input) is permanent.
+ */
+export function dbError(call: string, failure: DbFailure): JobError {
+  const code = failure.code ?? "";
+  const transient =
+    code === "" ||
+    code.startsWith("PGRST") ||
+    /^(08|40|53|57)/.test(code) ||
+    /^5\d\d$/.test(code) ||
+    /timeout|unavailable|too many|connection/i.test(failure.message);
+  return new JobError("db_error", `${call} failed: ${failure.message}${code ? ` (${code})` : ""}`, { transient, data: { code } });
+}
+
 /** Retry classification. Only a JobError marked transient or a network failure is retried. */
 export function classifyError(err: unknown): Failure {
   if (err instanceof JobError) {

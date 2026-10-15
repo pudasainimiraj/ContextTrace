@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { CoverageReport, RepositoryRecord, SourceType, StreamCoverage, StreamPhase } from "../shared/api.ts";
 import type { StreamCheckpoint } from "./checkpoints.ts";
 import { STREAM_SOURCE_TYPES } from "./extract.ts";
@@ -19,7 +20,7 @@ type CoverageRow = {
 /** Coverage counts, per-stream progress, high-water marks and sync times for one repository. */
 export async function getCoverage(db: SupabaseClient, repository: RepositoryRecord): Promise<CoverageReport> {
   const { data, error } = await db.rpc("repository_coverage", { p_repository_id: repository.id });
-  if (error) throw new Error(`repository_coverage failed: ${error.message}`);
+  if (error) throw dbError("repository_coverage", error);
   const row = (data ?? {}) as CoverageRow;
   const checkpoints = new Map((row.streams ?? []).map((c) => [c.stream, c]));
   const streams = Object.keys(STREAM_SOURCE_TYPES).map((stream) => streamCoverage(stream, checkpoints.get(stream)));

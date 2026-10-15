@@ -13,7 +13,7 @@ import {
 } from "./embeddings.ts";
 import { type Budget, milliNeuronsFor } from "./budget.ts";
 import { refreshRepositoryStatus } from "./repositories.ts";
-import { JobError } from "./retry.ts";
+import { JobError, dbError } from "./retry.ts";
 import { TRANSFORM_VERSION } from "./transform.ts";
 
 export const EMBED_JOB_KIND = "embed_passages";
@@ -100,7 +100,14 @@ export async function embedPassages(
       // the reservation is settled to the metered count once the response reports it.
       const estimatedTokens = batch.length * Math.max(...batch.map((p) => p.token_count));
       if (ctx.budget) await ctx.budget.take("ai_neurons_milli", milliNeuronsFor(estimatedTokens));
-      const result = await client.embed(batch.map((p) => p.text));
+      let result;
+      try {
+        result = await client.embed(batch.map((p) => p.text));
+      } catch (err) {
+        // A call that failed was not metered by Workers AI: the reservation goes back.
+        if (ctx.budget) await ctx.budget.settle("ai_neurons_milli", -milliNeuronsFor(estimatedTokens));
+        throw err;
+      }
       totals.batches += 1;
       totals.texts += batch.length;
       totals.embedMs += result.durationMs;
@@ -185,7 +192,7 @@ export function chunk<T>(items: T[], size: number): T[][] {
 
 export async function pendingPassages(db: SupabaseClient, repositoryId: number, limit: number): Promise<PendingPassage[]> {
   const { data, error } = await db.rpc("pending_passages", { p_repository_id: repositoryId, p_limit: limit });
-  if (error) throw new Error(`pending_passages failed: ${error.message}`);
+  if (error) throw dbError("pending_passages", error);
   return (data ?? []) as PendingPassage[];
 }
 
@@ -194,7 +201,7 @@ export async function upsertPassageEmbeddings(
   rows: PassageEmbeddingDraft[],
 ): Promise<{ inserted: number; updated: number }> {
   const { data, error } = await db.rpc("upsert_passage_embeddings", { p_rows: rows }).single();
-  if (error) throw new Error(`upsert_passage_embeddings failed: ${error.message}`);
+  if (error) throw dbError("upsert_passage_embeddings", error);
   return data as { inserted: number; updated: number };
 }
 
@@ -213,12 +220,12 @@ export async function recordEmbeddingUsage(
   },
 ): Promise<void> {
   const { error } = await db.from("embedding_usage").insert(usage);
-  if (error) throw new Error(`insert embedding_usage failed: ${error.message}`);
+  if (error) throw dbError("insert embedding_usage", error);
 }
 
 export async function embeddingStats(db: SupabaseClient, repositoryId: number): Promise<EmbeddingStats> {
   const { data, error } = await db.rpc("embedding_stats", { p_repository_id: repositoryId }).single();
-  if (error) throw new Error(`embedding_stats failed: ${error.message}`);
+  if (error) throw dbError("embedding_stats", error);
   const row = data as Record<string, number | string | null>;
   const n = (key: string) => Number(row[key] ?? 0);
   return {

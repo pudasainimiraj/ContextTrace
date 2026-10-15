@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { RepositoryRecord, RepositoryStatus } from "../shared/api.ts";
 import type { GitHubRepo } from "./github-api.ts";
 
@@ -42,7 +43,7 @@ export async function upsertRepository(
       p_full_name: repo.full_name,
     })
     .single();
-  if (error) throw new Error(`register_repository failed: ${error.message}`);
+  if (error) throw dbError("register_repository", error);
   const row = data as RepositoryRecord;
   return { row, created: row.submission_count === 1 };
 }
@@ -61,7 +62,7 @@ export async function refreshRepositoryStatus(
     p_repository_id: repositoryId,
     p_transform_version: transformVersion,
   });
-  if (error) throw new Error(`refresh_repository_status failed: ${error.message}`);
+  if (error) throw dbError("refresh_repository_status", error);
   return (data ?? null) as RepositoryStatus | null;
 }
 
@@ -71,7 +72,7 @@ export async function markRepositoryInaccessible(db: SupabaseClient, repositoryI
     .from("repositories")
     .update({ status: "inaccessible", last_error: reason.slice(0, 500), status_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", repositoryId);
-  if (error) throw new Error(`update repositories failed: ${error.message}`);
+  if (error) throw dbError("update repositories", error);
 }
 
 /**
@@ -84,13 +85,13 @@ export async function reinstateRepository(db: SupabaseClient, repositoryId: numb
     .update({ status: "registered", last_error: null, status_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", repositoryId)
     .in("status", ["inaccessible", "removed"]);
-  if (error) throw new Error(`update repositories failed: ${error.message}`);
+  if (error) throw dbError("update repositories", error);
   await refreshRepositoryStatus(db, repositoryId, transformVersion);
   return (await getRepository(db, repositoryId))!;
 }
 
 export async function getRepository(db: SupabaseClient, id: number): Promise<RepositoryRecord | null> {
   const { data, error } = await db.from("repositories").select("*").eq("id", id).maybeSingle();
-  if (error) throw new Error(`select repositories failed: ${error.message}`);
+  if (error) throw dbError("select repositories", error);
   return data as RepositoryRecord | null;
 }

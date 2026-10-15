@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { Budget } from "./budget.ts";
 import { BACKFILL_DELAY_SECONDS, fetchKind, rescanKind } from "./extract.ts";
 import { ensureQueuedJob, type JobQueue } from "./jobs.ts";
@@ -31,7 +32,7 @@ export async function dueStreams(db: SupabaseClient, options: SyncOptions = {}):
     p_limit: options.limit ?? SYNC_BATCH_LIMIT,
     p_repository_id: options.repositoryId ?? null,
   });
-  if (error) throw new Error(`streams_due_for_sync failed: ${error.message}`);
+  if (error) throw dbError("streams_due_for_sync", error);
   return (data ?? []) as DueStream[];
 }
 
@@ -60,7 +61,7 @@ export async function dueRescans(db: SupabaseClient, options: SyncOptions = {}):
     p_limit: options.limit ?? SYNC_BATCH_LIMIT,
     p_repository_id: options.repositoryId ?? null,
   });
-  if (error) throw new Error(`streams_due_for_rescan failed: ${error.message}`);
+  if (error) throw dbError("streams_due_for_rescan", error);
   return (data ?? []) as DueStream[];
 }
 
