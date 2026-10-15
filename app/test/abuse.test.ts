@@ -151,7 +151,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("turnstile", () => {
     expect(calls.github).toBe(0); // nothing reached GitHub so far
 
     const tooLong = await register("https://github.com/alice/abuse-t", { body: { turnstileToken: "x".repeat(2049) } }, scoped({ TURNSTILE_SECRET_KEY: ALWAYS_PASS }));
-    expect(tooLong.status).toBe(403);
+    expect(tooLong.status).toBe(400); // malformed input is refused before verification
     expect(calls.turnstile).toBe(2);
 
     const passed = await register("https://github.com/alice/abuse-t", { body: { turnstileToken: "XXXX.DUMMY.TOKEN.XXXX" } }, scoped({ TURNSTILE_SECRET_KEY: ALWAYS_PASS }));

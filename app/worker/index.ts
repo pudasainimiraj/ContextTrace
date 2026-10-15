@@ -14,12 +14,13 @@ import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
 import { clientKey, rateLimitResponse } from "./ratelimit.ts";
-import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
+import { search } from "./search.ts";
 import { scheduleRescans, scheduleSyncs } from "./sync.ts";
 import { listSources } from "./sources.ts";
 import { createDb, type EgressMeter, getRepository, reinstateRepository, upsertRepository } from "./repositories.ts";
 import { TRANSFORM_VERSION } from "./transform.ts";
-import { MAX_TURNSTILE_TOKEN_CHARS, verifyTurnstile } from "./turnstile.ts";
+import { verifyTurnstile } from "./turnstile.ts";
+import { validateJob, validateRegistration, validateSearch } from "./validate.ts";
 
 /** Everything a handler needs: a metered database client, the budget ledger and the metered queue. */
 type App = { db: SupabaseClient; budget: Budget; queue: JobQueue; meter: EgressMeter; env: Env };
@@ -41,6 +42,10 @@ export default {
     const app = createApp(env);
     try {
       return await route(request, app);
+    } catch (err) {
+      // Nothing about the failure reaches the client; the log has it.
+      console.error("unhandled request error", err);
+      return error(500, "internal_error", "Something went wrong on our side; the problem has been logged");
     } finally {
       settleEgress(app, ctx);
     }
@@ -137,24 +142,23 @@ async function getServiceStatus(app: App): Promise<Response> {
     protections: { turnstile: Boolean(app.env.TURNSTILE_SECRET_KEY), rate_limits: Boolean(app.env.SEARCH_LIMITER), admin: Boolean(app.env.ADMIN_TOKEN) },
     generated_at: new Date().toISOString(),
   };
-  return json(body, { headers: { "Cache-Control": "no-store" } });
+  return json(body);
 }
 
 /** POST /api/repositories  body: { url } -> 201 new | 200 already registered */
 async function submitRepository(request: Request, app: App): Promise<Response> {
   const { db, env, budget } = app;
   const body = await readJson(request);
-  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
-  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
-  const { url, turnstileToken } = typeof body === "object" && body !== null ? (body as { url?: unknown; turnstileToken?: unknown }) : {};
+  if (body instanceof Response) return body;
+  const input = validateRegistration(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
+  const { url, turnstileToken } = input.value;
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
 
   // Turnstile, when configured: the token is checked before anything else is spent.
   if (env.TURNSTILE_SECRET_KEY) {
-    if (typeof turnstileToken !== "string" || turnstileToken.length === 0 || turnstileToken.length > MAX_TURNSTILE_TOKEN_CHARS) {
-      return error(403, "verification_failed", "Complete the Turnstile check and send its token as turnstileToken");
-    }
+    if (!turnstileToken) return error(403, "verification_failed", "Complete the Turnstile check and send its token as turnstileToken");
     let verified;
     try {
       verified = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, clientKey(request));
@@ -228,14 +232,11 @@ async function listRepositorySources({ db }: App, repositoryId: number, url: URL
 /** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */
 async function createRepositoryJob(request: Request, { db, queue }: App, repositoryId: number): Promise<Response> {
   const body = await readJson(request);
-  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
-  if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
-  const kind = typeof body === "object" && body !== null ? (body as { kind?: unknown }).kind : undefined;
-  if (typeof kind !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(kind)) {
-    return error(400, "invalid_input", "kind must be a snake_case identifier");
-  }
+  if (body instanceof Response) return body;
+  const input = validateJob(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
   if (!(await getRepository(db, repositoryId))) return error(404, "not_found", "Repository is not registered");
-  const created = await createJob(db, repositoryId, kind);
+  const created = await createJob(db, repositoryId, input.value.kind);
   const job = await enqueueJob(db, queue, created.id);
   if (!job) throw new Error(`job ${created.id} could not be enqueued`);
   return json(job, { status: 202 });
@@ -265,17 +266,10 @@ async function getEmbeddingStats({ db }: App, repositoryId: number): Promise<Res
 /** POST /api/search  body: { repositoryId, query, limit? } -> evidence cards, query embedded on the server */
 async function searchRepository(request: Request, { db, env, budget }: App): Promise<Response> {
   const body = await readJson(request);
-  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return error(400, "invalid_input", "Request body must be a JSON object");
-  }
-  const { repositoryId, query, limit } = body as { repositoryId?: unknown; query?: unknown; limit?: unknown };
-  if (!isPositiveInt(repositoryId)) return error(400, "invalid_input", "repositoryId must be a positive integer");
-  if (typeof query !== "string" || query.trim() === "") return error(400, "invalid_input", "query must be a non-empty string");
-  if (query.length > MAX_QUERY_CHARS) return error(400, "invalid_input", `query must be at most ${MAX_QUERY_CHARS} characters`);
-  if (limit !== undefined && (!isPositiveInt(limit) || limit > SEARCH_LIMIT_MAX)) {
-    return error(400, "invalid_input", `limit must be an integer from 1 to ${SEARCH_LIMIT_MAX}`);
-  }
+  if (body instanceof Response) return body;
+  const input = validateSearch(body);
+  if (!input.ok) return error(400, "invalid_input", input.message);
+  const { repositoryId, query, limit } = input.value;
 
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
@@ -286,10 +280,6 @@ async function searchRepository(request: Request, { db, env, budget }: App): Pro
     });
   }
   return json(await search({ db, embeddings: createEmbeddingClient(env), budget }, { repository, query, limit }));
-}
-
-function isPositiveInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 /** GET /api/repositories/:id/coverage -> counts, stream progress, high-water marks and sync times */
@@ -332,31 +322,38 @@ function lookupError(lookup: Exclude<RepoLookup, { kind: "ok" }>): Response {
 
 /** Request bodies are small JSON documents; anything larger is refused before it is parsed. */
 export const MAX_BODY_BYTES = 8192;
-const BODY_TOO_LARGE: unique symbol = Symbol("body too large");
 
-/** Parsed JSON body, undefined when it is not valid JSON, or BODY_TOO_LARGE past MAX_BODY_BYTES. */
-async function readJson(request: Request): Promise<unknown> {
+/**
+ * The parsed JSON body, or the error response to send instead: 415 for a body that is not
+ * declared as JSON, 413 past MAX_BODY_BYTES, 400 when it does not parse.
+ */
+async function readJson(request: Request): Promise<unknown | Response> {
+  const type = request.headers.get("content-type") ?? "";
+  if (!/^application\/json\b/i.test(type)) return error(415, "unsupported_media_type", "Request body must be application/json");
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return BODY_TOO_LARGE;
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
   let text: string;
   try {
     text = await request.text();
   } catch {
-    return undefined;
+    return error(400, "invalid_input", "Request body could not be read");
   }
-  if (text.length > MAX_BODY_BYTES) return BODY_TOO_LARGE;
+  if (text.length > MAX_BODY_BYTES) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as unknown;
   } catch {
-    return undefined;
+    return error(400, "invalid_input", "Request body must be JSON");
   }
 }
 
+/** Every API response: JSON, never cached, never sniffed. */
+const API_HEADERS = { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" };
+
 function json(body: unknown, init?: ResponseInit): Response {
-  return Response.json(body, init);
+  return Response.json(body, { ...init, headers: { ...API_HEADERS, ...(init?.headers as Record<string, string> | undefined) } });
 }
 
 function error(status: number, code: string, message: string, headers?: Record<string, string>): Response {
   const body: ApiError = { error: code, message };
-  return Response.json(body, { status, headers });
+  return Response.json(body, { status, headers: { ...API_HEADERS, ...headers } });
 }

@@ -6,7 +6,7 @@ import { EMBEDDING_DIMS, FakeEmbeddingClient, fakeVector } from "../worker/embed
 import { createJob } from "../worker/jobs.ts";
 import { createDb, getRepository, upsertRepository } from "../worker/repositories.ts";
 import { MAX_QUERY_CHARS, SCORE_HIGH, SCORE_LOW, search } from "../worker/search.ts";
-import { insertPassages, jsonResponse, repoFixture } from "./helpers.ts";
+import { expectNoSecrets as expectNoSecretsShared, insertPassages, jsonResponse, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project with Workers AI stubbed; see jobs.test.ts for the
 // id scheme. Two repositories hold the same texts so cross-repository leakage would show
@@ -57,10 +57,7 @@ function respondWith(vector: number[]): (texts: string[]) => Response {
 
 /** Nothing from the environment or from the model's error text may reach a client. */
 function expectNoSecrets(text: string): void {
-  for (const secret of [env.WORKERS_AI_API_TOKEN, env.SUPABASE_SECRET_KEY, env.CLOUDFLARE_ACCOUNT_ID, AI_ERROR_MARKER]) {
-    expect(secret).toBeTruthy();
-    expect(text).not.toContain(secret);
-  }
+  expectNoSecretsShared(text, [AI_ERROR_MARKER]);
 }
 function vectorsFor(texts: string[]): Response {
   return jsonResponse(200, {
