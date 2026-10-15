@@ -43,3 +43,52 @@ are the knobs, at the price of more queue operations per repository.
 rate-limited at once (every fetch and rescan parked as `rate_limited`), so the deployed Worker
 needs `GITHUB_TOKEN`; it was added as a secret. `wrangler tail --format json` pretty-prints
 each event over many lines, so a reader must decode concatenated JSON objects, not lines.
+
+## CT-37 to CT-42: what was built
+
+| Task | Delivered | Pinned by |
+| --- | --- | --- |
+| CT-37 | `usage_budgets` with atomic reservations at 80% of every free allowance; reservations at every metered call; `GET /api/status` | `budget.test.ts` |
+| CT-38 | pauses that keep the attempt and resume at the next window; 429/503 with Retry-After for admissions and searches; no follow-up jobs after runs that changed nothing; hourly syncs; schedulers defer below 20% queue budget; 25-repository and storage-warning admission limits; 5,000-item stream cap with explicit warnings | `pause.test.ts` |
+| CT-39 | per-address rate limits (30 searches, 5 registrations, 120 reads a minute); Turnstile when configured; admin token on job triggers; 8 KB body cap | `abuse.test.ts` |
+| CT-40 | secrets only in Wrangler secrets and `app/.env`; one validator per route; topK clamped to 10 in SQL and API; fetch targets pinned to `api.github.com` under the job's repository; CSP and security headers; generic 500 | `security.test.ts` |
+| CT-41 | 14-day job history, 90-day usage, removal after 30 days unreachable with a tombstone; admin `DELETE`; storage warning pauses admissions, backfills and rescans, critical pauses syncs; nothing searchable is ever deleted by the cron | `retention.test.ts` |
+| CT-42 | drills for zero quota, GitHub and Workers AI 429, expired lease, duplicate delivery, database partial failure and model errors; database failures are now transient `db_error` and failed model calls refund their reservation | `reliability.test.ts` |
+
+## Live acceptance (2026-10-15, Workers Free, version f65aa628)
+
+The global inference budget was cut from 8,000,000 to 100 milli-neurons (about 54 tokens),
+then `sindresorhus/p-defer` (GitHub id 71531782) was registered through the public API.
+
+```
+t+12s  jobs: fetch_issues succeeded, fetch_issue_comments running, transform queued
+t+17s  jobs: heads succeeded, transform succeeded (15 passages), embed_passages retry_pending:budget_exhausted
+       job 4406: attempt 0, "Budget ai_neurons_milli is exhausted (16675 of 100) until 2026-10-16T00:00:00+00:00"
+GET /api/status      paused: true  reasons: ["ai_neurons_milli: 16675 of 100 used, resets at 2026-10-16T00:00:00+00:00"]  admissions open: true
+POST /api/search     "defer a promise"  -> 200 mode=keyword confidence=low results=2 semantic_error=budget_exhausted
+                     message: Semantic search is paused until 2026-10-16T00:00:00+00:00 (inference budget reached). Showing passages that contain your search words; verify them at the source.
+                     0.065 | #9 Update typings to explicitly not require a bo… | https://github.com/sindresorhus/p-defer/pull/9
+POST /api/search     "resolve later"    -> 200 mode=none  message: Semantic search is paused … and no passage contains your search words.
+```
+
+The budget was restored and the parked job's `next_attempt_at` moved into the past, as the
+window's end would. Nobody touched the job again: the 5-minute reconcile cron resent its
+message, it ran at t+82 s and succeeded at t+88 s with attempt 1 (24 texts, 1,729 tokens,
+6,072 billed, 11.2 neurons). Afterwards:
+
+```
+GET /api/repositories/71531782/coverage   status=searchable passages=24 embedded=24 pending=0 jobs all 0
+GET /api/status                           paused: false
+select active passages, vectors, stale    24 | 24 | 0
+responses captured: 11 | secret values found: 0
+```
+
+**Acceptance.** The public service paused predictably at the budget cap (one refused
+reservation, no attempt consumed, the reason and the reset time on `/api/status` and in
+the search message), kept serving the keyword baseline, resumed by itself once the window
+reset, leaked no credential in any response, and left the index consistent (every active
+passage has exactly one vector with the current hash). No plan was upgraded: the Worker,
+Queues, Workers AI and Supabase all stayed on their free tiers.
+
+**Fix found by the live run.** None in the code; the measurement script's own output
+formatting failed on four lines and the captured responses were read back from disk.
