@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { Budget } from "./budget.ts";
 
 /** Repositories the service admits in total; beyond it, new registrations wait. */
@@ -21,7 +22,7 @@ export async function admissionState(db: SupabaseClient, budget: Budget, options
     return { open: false, reason: `Storage is at ${Math.round((storage.used / storage.limit) * 100)}% of its budget; new repositories are not accepted until space is freed` };
   }
   const { count, error } = await db.from("repositories").select("id", { count: "exact", head: true }).neq("status", "removed");
-  if (error) throw new Error(`count repositories failed: ${error.message}`);
+  if (error) throw dbError("count repositories", error);
   const max = options.maxRepositories ?? MAX_REPOSITORIES;
   if ((count ?? 0) >= max) {
     return { open: false, reason: `The service holds its maximum of ${max} repositories; new registrations are not accepted` };
@@ -32,6 +33,6 @@ export async function admissionState(db: SupabaseClient, budget: Budget, options
 /** The repository row that a resubmission refers to, by its current GitHub name. */
 export async function findByFullName(db: SupabaseClient, fullName: string): Promise<{ id: number } | null> {
   const { data, error } = await db.from("repositories").select("id").ilike("full_name", fullName).limit(1).maybeSingle();
-  if (error) throw new Error(`select repositories failed: ${error.message}`);
+  if (error) throw dbError("select repositories", error);
   return data as { id: number } | null;
 }

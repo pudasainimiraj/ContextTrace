@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { JobRecord } from "../shared/api.ts";
 import { type Budget, isBudgetExhausted, QUEUE_OPS_PER_MESSAGE } from "./budget.ts";
 
@@ -28,7 +29,7 @@ export function meteredQueue(queue: JobQueue, budget: Budget): JobQueue {
 
 export async function createJob(db: SupabaseClient, repositoryId: number, kind: string): Promise<JobRecord> {
   const { data, error } = await db.from("jobs").insert({ repository_id: repositoryId, kind }).select().single();
-  if (error) throw new Error(`insert jobs failed: ${error.message}`);
+  if (error) throw dbError("insert jobs", error);
   return data as JobRecord;
 }
 
@@ -46,7 +47,7 @@ export async function enqueueJob(
   options: { delaySeconds?: number } = {},
 ): Promise<JobRecord | null> {
   const { data, error } = await db.rpc("enqueue_job", { p_job_id: jobId }).maybeSingle();
-  if (error) throw new Error(`enqueue_job failed: ${error.message}`);
+  if (error) throw dbError("enqueue_job", error);
   if (!data) return null;
   const job = data as JobRecord;
   const message: JobMessage = { jobId: job.id, repoId: job.repository_id, kind: job.kind, generation: job.generation };
@@ -62,7 +63,7 @@ export async function enqueueJob(
 
 export async function getJob(db: SupabaseClient, id: number): Promise<JobRecord | null> {
   const { data, error } = await db.from("jobs").select("*").eq("id", id).maybeSingle();
-  if (error) throw new Error(`select jobs failed: ${error.message}`);
+  if (error) throw dbError("select jobs", error);
   return data as JobRecord | null;
 }
 
@@ -93,7 +94,7 @@ export async function claimJob(
       p_lease_seconds: leaseSeconds,
     })
     .maybeSingle();
-  if (error) throw new Error(`claim_job failed: ${error.message}`);
+  if (error) throw dbError("claim_job", error);
   if (data) return { outcome: "claimed", job: data as JobRecord };
 
   const job = await getJob(db, message.jobId);
@@ -128,7 +129,7 @@ export async function finishJob(
     .eq("lease_owner", owner)
     .select()
     .maybeSingle();
-  if (error) throw new Error(`finish job failed: ${error.message}`);
+  if (error) throw dbError("finish job", error);
   return data as JobRecord | null;
 }
 
@@ -152,7 +153,7 @@ export async function ensureQueuedJob(
     .eq("kind", kind)
     .in("state", ["queued", "retry_pending"])
     .limit(1);
-  if (error) throw new Error(`select jobs failed: ${error.message}`);
+  if (error) throw dbError("select jobs", error);
   if (data && data.length > 0) return null;
   const job = await createJob(db, repositoryId, kind);
   return enqueueJob(db, queue, job.id, options);

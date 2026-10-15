@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { DocumentType, EvidenceCard, EvidenceMatch, SearchHit, SourceType } from "../shared/api.ts";
 
 /** Excerpt length in code points; a sentence or two, enough to judge a result before opening it. */
@@ -78,7 +79,7 @@ export async function resolveEvidence(
       "passage_id",
       hits.map((h) => h.passage_id),
     );
-  if (error) throw new Error(`select passages failed: ${error.message}`);
+  if (error) throw dbError("select passages", error);
   const rows = new Map(((data ?? []) as unknown as PassageJoin[]).map((row) => [row.passage_id, row]));
 
   const cards: EvidenceCard[] = [];

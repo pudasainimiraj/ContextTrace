@@ -6,7 +6,7 @@ import { embeddingStats } from "./embed.ts";
 import { MAX_ITEMS_PER_STREAM } from "./extract.ts";
 import { type EmbeddingClient, validateVector } from "./embeddings.ts";
 import { resolveEvidence } from "./evidence.ts";
-import { JobError } from "./retry.ts";
+import { JobError, dbError } from "./retry.ts";
 
 /** Results per search; the evidence cards show the top 3 to 5. */
 export const SEARCH_LIMIT_DEFAULT = 5;
@@ -48,7 +48,13 @@ export async function embedQuery(
 ): Promise<{ vector: number[]; durationMs: number }> {
   if (!embeddings) throw new JobError("ai_not_configured", "No embedding client is configured", { transient: false });
   if (budget) await budget.take("ai_neurons_milli", QUERY_RESERVE_MILLI_NEURONS);
-  const result = await embeddings.embed([query]);
+  let result;
+  try {
+    result = await embeddings.embed([query]);
+  } catch (err) {
+    if (budget) await budget.settle("ai_neurons_milli", -QUERY_RESERVE_MILLI_NEURONS);
+    throw err;
+  }
   if (budget && result.tokens !== undefined) await budget.settle("ai_neurons_milli", milliNeuronsFor(result.tokens) - QUERY_RESERVE_MILLI_NEURONS);
   const vector = result.vectors[0];
   const problem = validateVector(vector);
@@ -194,7 +200,7 @@ export async function searchKeyword(
     p_query: query,
     p_limit: Math.min(Math.max(limit, 1), SEARCH_LIMIT_MAX),
   });
-  if (error) throw new Error(`search_passages_keyword failed: ${error.message}`);
+  if (error) throw dbError("search_passages_keyword", error);
   return ownRows((data ?? []) as SearchMatch[], repositoryId, "search_passages_keyword");
 }
 
@@ -216,7 +222,7 @@ export async function searchSemantic(
     p_query: JSON.stringify(queryVector),
     p_limit: Math.min(Math.max(limit, 1), SEARCH_LIMIT_MAX),
   });
-  if (error) throw new Error(`search_passages failed: ${error.message}`);
+  if (error) throw dbError("search_passages", error);
   return ownRows((data ?? []) as SearchMatch[], repositoryId, "search_passages");
 }
 

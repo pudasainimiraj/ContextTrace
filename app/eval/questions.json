@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "frozen_at": "2026-10-15",
+  "questions": [
+    {
+      "id": "q01",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "How do I wait until every task I added to the queue has finished?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:9:issue_comment:304635713:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/9#issuecomment-304635713"
+        },
+        {
+          "passage_id": "github:72200120:issue:9:issue_comment:304666591:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/9#issuecomment-304666591"
+        },
+        {
+          "passage_id": "github:72200120:issue:12:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/12"
+        }
+      ],
+      "rationale": "#9: Promise.all over the add() promises, then the addAll proposal; #12: onEmpty resolving when the queue is already empty."
+    },
+    {
+      "id": "q02",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "What is the difference between onEmpty and onIdle, and why do they return promises instead of events?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:28:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/28"
+        },
+        {
+          "passage_id": "github:72200120:issue:28:issue_comment:370831999:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/28#issuecomment-370831999"
+        },
+        {
+          "passage_id": "github:72200120:issue:28:issue_comment:452169011:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/28#issuecomment-452169011"
+        }
+      ],
+      "rationale": "#28 opens the promise-vs-event debate; the maintainer explains why promises; a later comment defends single-use promises."
+    },
+    {
+      "id": "q03",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "If one task throws, does p-queue stop processing the rest of the queue?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:29:issue_comment:378490250:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/29#issuecomment-378490250"
+        },
+        {
+          "passage_id": "github:72200120:issue:29:issue_comment:378490756:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/29#issuecomment-378490756"
+        },
+        {
+          "passage_id": "github:72200120:issue:29:issue_comment:416897264:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/29#issuecomment-416897264"
+        }
+      ],
+      "rationale": "#29: add() rejects per task, the queue keeps going, and pauseOnError was proposed as the opt-in."
+    },
+    {
+      "id": "q04",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "How do I run at most N tasks per second, like a rate limit, with p-queue?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:46:issue_comment:426794940:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/46#issuecomment-426794940"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:35:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/35"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:35:issue_comment:405172958:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/35#issuecomment-405172958"
+        }
+      ],
+      "rationale": "#46 explains interval and intervalCap; PR #35 added throttling and settled the intervalCap name."
+    },
+    {
+      "id": "q05",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "Can I change the concurrency of a queue after it has been created?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:pull_request:52:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/52"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:52:review_comment:244627481:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/52#discussion_r244627481"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:52:review_comment:244627588:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/52#discussion_r244627588"
+        }
+      ],
+      "rationale": "PR #52 (closes #38) added it; the review settled on a getter/setter property rather than a method."
+    },
+    {
+      "id": "q06",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "How do I apply backpressure so the queue does not grow without bound before I add more tasks?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:87:issue_comment:585936028:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/87#issuecomment-585936028"
+        },
+        {
+          "passage_id": "github:72200120:issue:87:issue_comment:816799445:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/87#issuecomment-816799445"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:131:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/131"
+        }
+      ],
+      "rationale": "#87 discusses a maxSize option and lands on onSizeLessThan(); PR #131 adds it."
+    },
+    {
+      "id": "q07",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "Can I change the priority of a task that is already waiting in the queue?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:pull_request:209:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/209"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:209:review_comment:1681289162:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/209#discussion_r1681289162"
+        },
+        {
+          "passage_id": "github:72200120:pull_request:209:review_comment:1903097475:0",
+          "url": "https://github.com/sindresorhus/p-queue/pull/209#discussion_r1903097475"
+        }
+      ],
+      "rationale": "PR #209 adds setPriority() with an id per promise function; reviews settle its semantics and errors."
+    },
+    {
+      "id": "q08",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "When I abort a task with an AbortSignal, is it removed from the queue?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:72200120:issue:219:body:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/219"
+        },
+        {
+          "passage_id": "github:72200120:issue:219:issue_comment:2714301065:0",
+          "url": "https://github.com/sindresorhus/p-queue/issues/219#issuecomment-2714301065"
+        }
+      ],
+      "rationale": "#219: aborted tasks stay queued until they reach the front; a forked fix and PR #220 are discussed."
+    },
+    {
+      "id": "q09",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Can I limit the concurrency of a single function instead of wrapping every call with limit()?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:issue:86:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/86"
+        },
+        {
+          "passage_id": "github:71542716:issue:86:issue_comment:2242853511:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/86#issuecomment-2242853511"
+        },
+        {
+          "passage_id": "github:71542716:issue:86:issue_comment:2554721244:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/86#issuecomment-2554721244"
+        }
+      ],
+      "rationale": "#86 proposes it; the maintainer names it limitFunction; it was fixed by a commit."
+    },
+    {
+      "id": "q10",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "What happens to promises that are still waiting when I call clearQueue()?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:issue:25:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/25"
+        },
+        {
+          "passage_id": "github:71542716:pull_request:27:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/27"
+        },
+        {
+          "passage_id": "github:71542716:pull_request:27:issue_comment:633890368:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/27#issuecomment-633890368"
+        }
+      ],
+      "rationale": "#25 asks whether clearQueue should reject them; PR #27 made rejection the breaking-change behaviour."
+    },
+    {
+      "id": "q11",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Is it safe to call the same limiter recursively from inside a limited task?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:issue:91:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/91"
+        },
+        {
+          "passage_id": "github:71542716:issue:91:issue_comment:3844873705:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/91#issuecomment-3844873705"
+        },
+        {
+          "passage_id": "github:71542716:issue:91:issue_comment:3841257122:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/91#issuecomment-3841257122"
+        }
+      ],
+      "rationale": "#91 shows silent task loss with recursive use; the maintainer will not add detection and advises against recursion."
+    },
+    {
+      "id": "q12",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Can I change the concurrency limit of a limiter at runtime?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:pull_request:79:review_comment:1592984324:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/79#discussion_r1592984324"
+        },
+        {
+          "passage_id": "github:71542716:pull_request:79:review_comment:1665964056:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/79#discussion_r1665964056"
+        }
+      ],
+      "rationale": "PR #79 makes concurrency a getter/setter and explains the dequeue change it needs."
+    },
+    {
+      "id": "q13",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Why does p-limit v5 fail with \"Cannot resolve '#async_hooks'\" in Next.js, esbuild or tsx?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:issue:72:issue_comment:1793770212:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/72#issuecomment-1793770212"
+        },
+        {
+          "passage_id": "github:71542716:issue:75:issue_comment:2135265931:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/75#issuecomment-2135265931"
+        },
+        {
+          "passage_id": "github:71542716:issue:75:issue_comment:2208787869:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/75#issuecomment-2208787869"
+        }
+      ],
+      "rationale": "#72: sub-path imports the bundler does not support; #75: a Node issue, and v6 dropped sub-path exports."
+    },
+    {
+      "id": "q14",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Does the function passed to limit() run synchronously when there is free capacity?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:issue:22:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/22"
+        },
+        {
+          "passage_id": "github:71542716:issue:22:issue_comment:589939738:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/22#issuecomment-589939738"
+        },
+        {
+          "passage_id": "github:71542716:pull_request:28:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/28"
+        }
+      ],
+      "rationale": "#22 reports mixed sync/async behaviour, called a bug; PR #28 makes every call asynchronous."
+    },
+    {
+      "id": "q15",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Is there a built-in way to map over an array with the limiter, like Promise.all with a concurrency limit?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71542716:pull_request:90:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/pull/90"
+        },
+        {
+          "passage_id": "github:71542716:issue:74:body:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/74"
+        },
+        {
+          "passage_id": "github:71542716:issue:74:issue_comment:2798172848:0",
+          "url": "https://github.com/sindresorhus/p-limit/issues/74#issuecomment-2798172848"
+        }
+      ],
+      "rationale": "#74 proposes limit.with; PR #90 adds the convenience map/Promise.all function instead."
+    },
+    {
+      "id": "q16",
+      "repository_id": 315531538,
+      "repository": "sindresorhus/yocto-queue",
+      "question": "Is yocto-queue actually faster than using a plain array as a queue?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:315531538:issue:10:body:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/10"
+        },
+        {
+          "passage_id": "github:315531538:issue:10:issue_comment:2520827594:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/10#issuecomment-2520827594"
+        },
+        {
+          "passage_id": "github:315531538:issue:9:body:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/9"
+        }
+      ],
+      "rationale": "#9/#10 benchmark it 5-8x slower on enqueue; the maintainer points to the micro-benchmark fallacy."
+    },
+    {
+      "id": "q17",
+      "repository_id": 315531538,
+      "repository": "sindresorhus/yocto-queue",
+      "question": "Does iterating over the queue remove the items, and how do I drain it instead?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:315531538:issue:11:issue_comment:2696500039:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/11#issuecomment-2696500039"
+        },
+        {
+          "passage_id": "github:315531538:issue:11:body:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/11"
+        },
+        {
+          "passage_id": "github:315531538:pull_request:12:body:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/pull/12"
+        }
+      ],
+      "rationale": "#11: iteration does not dequeue by design; PR #12 adds drain()."
+    },
+    {
+      "id": "q18",
+      "repository_id": 315531538,
+      "repository": "sindresorhus/yocto-queue",
+      "question": "Can I use yocto-queue from CommonJS with require, or under Jest?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:315531538:issue:15:issue_comment:2855037712:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/15#issuecomment-2855037712"
+        },
+        {
+          "passage_id": "github:315531538:issue:15:body:0",
+          "url": "https://github.com/sindresorhus/yocto-queue/issues/15"
+        }
+      ],
+      "rationale": "#15: no CJS support planned; the Jest setup is the problem."
+    },
+    {
+      "id": "q19",
+      "repository_id": 71531782,
+      "repository": "sindresorhus/p-defer",
+      "question": "Is p-defer still needed now that Promise.withResolvers exists?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71531782:issue:8:body:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/8"
+        },
+        {
+          "passage_id": "github:71531782:issue:8:issue_comment:2743855787:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/8#issuecomment-2743855787"
+        },
+        {
+          "passage_id": "github:71531782:issue:8:issue_comment:3265832301:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/8#issuecomment-3265832301"
+        }
+      ],
+      "rationale": "#8: the proposal, the TypeScript 5.4 note, and the maintainer's decision not to deprecate."
+    },
+    {
+      "id": "q20",
+      "repository_id": 71531782,
+      "repository": "sindresorhus/p-defer",
+      "question": "Why does requiring p-defer v4 fail with \"Must use import to load ES Module\"?",
+      "supported": true,
+      "relevant": [
+        {
+          "passage_id": "github:71531782:issue:7:body:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/7"
+        },
+        {
+          "passage_id": "github:71531782:issue:7:issue_comment:839427648:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/7#issuecomment-839427648"
+        },
+        {
+          "passage_id": "github:71531782:issue:7:issue_comment:864476408:0",
+          "url": "https://github.com/sindresorhus/p-defer/issues/7#issuecomment-864476408"
+        }
+      ],
+      "rationale": "#7: the ESM-only release; read the release notes; a user's objection."
+    },
+    {
+      "id": "q21",
+      "repository_id": 71542716,
+      "repository": "sindresorhus/p-limit",
+      "question": "Can p-limit distribute tasks across worker threads or multiple processes?",
+      "supported": false,
+      "relevant": [],
+      "rationale": "Never discussed in p-limit (the cross-process question lives in p-queue #139)."
+    },
+    {
+      "id": "q22",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "Does p-queue persist its tasks to Redis or disk so they survive a restart?",
+      "supported": false,
+      "relevant": [],
+      "rationale": "Persistence was never discussed; #139 is about cross-process coordination, not storage."
+    },
+    {
+      "id": "q23",
+      "repository_id": 315531538,
+      "repository": "sindresorhus/yocto-queue",
+      "question": "How do I configure yocto-queue to order items by priority?",
+      "supported": false,
+      "relevant": [],
+      "rationale": "A FIFO with no priority feature or discussion."
+    },
+    {
+      "id": "q24",
+      "repository_id": 71531782,
+      "repository": "sindresorhus/p-defer",
+      "question": "How do I use p-defer together with Python's asyncio?",
+      "supported": false,
+      "relevant": [],
+      "rationale": "Off-topic: a JavaScript library."
+    },
+    {
+      "id": "q25",
+      "repository_id": 72200120,
+      "repository": "sindresorhus/p-queue",
+      "question": "What Kubernetes resource limits should I set for pods that run p-queue?",
+      "supported": false,
+      "relevant": [],
+      "rationale": "Off-topic: infrastructure, not the library."
+    }
+  ]
+}

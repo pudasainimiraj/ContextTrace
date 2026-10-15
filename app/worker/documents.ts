@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { dbError } from "./retry.ts";
 import type { DocumentRecord, PassageRecord, SourceRecord } from "../shared/api.ts";
 import type { PassageRow } from "./passages.ts";
 
@@ -17,7 +18,7 @@ export async function dirtyDocuments(
     p_transform_version: transformVersion,
     p_limit: limit,
   });
-  if (error) throw new Error(`dirty_documents failed: ${error.message}`);
+  if (error) throw dbError("dirty_documents", error);
   return ((data ?? []) as { number: number }[]).map((row) => row.number);
 }
 
@@ -36,7 +37,7 @@ export async function listDocumentSources(db: SupabaseClient, repositoryId: numb
       .order("type")
       .order("github_id")
       .range(from, from + SOURCES_PAGE - 1);
-    if (error) throw new Error(`select sources failed: ${error.message}`);
+    if (error) throw dbError("select sources", error);
     rows.push(...((data ?? []) as SourceRecord[]));
     if (!data || data.length < SOURCES_PAGE) return rows;
   }
@@ -45,7 +46,7 @@ export async function listDocumentSources(db: SupabaseClient, repositoryId: numb
 /** One round trip: upsert documents, upsert changed passages, remove stale ones. */
 export async function syncPassages(db: SupabaseClient, documents: DocumentRow[], passages: PassageRow[]): Promise<SyncCounts> {
   const { data, error } = await db.rpc("sync_passages", { p_documents: documents, p_passages: passages }).single();
-  if (error) throw new Error(`sync_passages failed: ${error.message}`);
+  if (error) throw dbError("sync_passages", error);
   return data as SyncCounts;
 }
 
@@ -56,7 +57,7 @@ export async function getDocumentByNumber(db: SupabaseClient, repositoryId: numb
     .eq("repository_id", repositoryId)
     .eq("number", number)
     .maybeSingle();
-  if (error) throw new Error(`select documents failed: ${error.message}`);
+  if (error) throw dbError("select documents", error);
   return data as DocumentRecord | null;
 }
 
@@ -80,6 +81,6 @@ export async function listPassages(
     .order("source_github_id")
     .order("chunk_index")
     .limit(Math.min(filter.limit ?? MAX_PASSAGES_PAGE, MAX_PASSAGES_PAGE));
-  if (error) throw new Error(`select passages failed: ${error.message}`);
+  if (error) throw dbError("select passages", error);
   return (data ?? []) as PassageRecord[];
 }
