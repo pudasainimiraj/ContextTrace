@@ -1,5 +1,6 @@
 import type { ApiError, ServiceStatus, SourceType } from "../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { requireAdmin } from "./admin.ts";
 import { admissionState, findByFullName } from "./admission.ts";
 import { Budget, budgetExhausted as budgetExhaustedError, databaseSize, GLOBAL_SCOPE, retryAfterHeader } from "./budget.ts";
 import { consumeJobMessage } from "./consumer.ts";
@@ -12,11 +13,13 @@ import { embeddingStats } from "./embed.ts";
 import { createEmbeddingClient } from "./embeddings.ts";
 import { startExtraction } from "./pipeline.ts";
 import { reconcileJobs } from "./reconcile.ts";
+import { clientKey, rateLimitResponse } from "./ratelimit.ts";
 import { MAX_QUERY_CHARS, SEARCH_LIMIT_MAX, search } from "./search.ts";
 import { scheduleRescans, scheduleSyncs } from "./sync.ts";
 import { listSources } from "./sources.ts";
 import { createDb, type EgressMeter, getRepository, reinstateRepository, upsertRepository } from "./repositories.ts";
 import { TRANSFORM_VERSION } from "./transform.ts";
+import { MAX_TURNSTILE_TOKEN_CHARS, verifyTurnstile } from "./turnstile.ts";
 
 /** Everything a handler needs: a metered database client, the budget ledger and the metered queue. */
 type App = { db: SupabaseClient; budget: Budget; queue: JobQueue; meter: EgressMeter; env: Env };
@@ -82,17 +85,30 @@ export default {
 async function route(request: Request, app: App): Promise<Response> {
   const { pathname } = new URL(request.url);
   const { method } = request;
+  const { env } = app;
 
   if (method === "GET" && pathname === "/api/health") return json({ ok: true });
+
+  // Expensive endpoints are limited per address; reads more loosely; admin routes by token.
+  if (method === "POST" && pathname === "/api/search") {
+    return (await rateLimitResponse(env.SEARCH_LIMITER, request, "search")) ?? searchRepository(request, app);
+  }
+  if (method === "POST" && pathname === "/api/repositories") {
+    return (await rateLimitResponse(env.REGISTER_LIMITER, request, "register")) ?? submitRepository(request, app);
+  }
+  const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
+  if (method === "POST" && jobsOf) {
+    return (await requireAdmin(request, env.ADMIN_TOKEN)) ?? createRepositoryJob(request, app, Number(jobsOf[1]));
+  }
+  if (method === "GET") {
+    const limited = await rateLimitResponse(env.READ_LIMITER, request, "read");
+    if (limited) return limited;
+  }
+
   if (method === "GET" && pathname === "/api/status") return getServiceStatus(app);
-  if (method === "POST" && pathname === "/api/repositories") return submitRepository(request, app);
-  if (method === "POST" && pathname === "/api/search") return searchRepository(request, app);
 
   const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
   if (method === "GET" && byId) return getRepositoryById(app, Number(byId[1]));
-
-  const jobsOf = /^\/api\/repositories\/(\d+)\/jobs$/.exec(pathname);
-  if (method === "POST" && jobsOf) return createRepositoryJob(request, app, Number(jobsOf[1]));
 
   const sourcesOf = /^\/api\/repositories\/(\d+)\/sources$/.exec(pathname);
   if (method === "GET" && sourcesOf) return listRepositorySources(app, Number(sourcesOf[1]), new URL(request.url));
@@ -118,6 +134,7 @@ async function getServiceStatus(app: App): Promise<Response> {
     reasons: exhausted.map((b) => `${b.resource}: ${b.used} of ${b.limit} used${b.resets_at ? `, resets at ${b.resets_at}` : ""}`),
     budgets,
     admissions,
+    protections: { turnstile: Boolean(app.env.TURNSTILE_SECRET_KEY), rate_limits: Boolean(app.env.SEARCH_LIMITER), admin: Boolean(app.env.ADMIN_TOKEN) },
     generated_at: new Date().toISOString(),
   };
   return json(body, { headers: { "Cache-Control": "no-store" } });
@@ -127,10 +144,28 @@ async function getServiceStatus(app: App): Promise<Response> {
 async function submitRepository(request: Request, app: App): Promise<Response> {
   const { db, env, budget } = app;
   const body = await readJson(request);
+  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
   if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
-  const url = typeof body === "object" && body !== null ? (body as { url?: unknown }).url : undefined;
+  const { url, turnstileToken } = typeof body === "object" && body !== null ? (body as { url?: unknown; turnstileToken?: unknown }) : {};
   const parsed = parseRepositoryInput(url);
   if (!parsed.ok) return error(400, "invalid_input", parsed.error);
+
+  // Turnstile, when configured: the token is checked before anything else is spent.
+  if (env.TURNSTILE_SECRET_KEY) {
+    if (typeof turnstileToken !== "string" || turnstileToken.length === 0 || turnstileToken.length > MAX_TURNSTILE_TOKEN_CHARS) {
+      return error(403, "verification_failed", "Complete the Turnstile check and send its token as turnstileToken");
+    }
+    let verified;
+    try {
+      verified = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, turnstileToken, clientKey(request));
+    } catch (err) {
+      console.error("turnstile verification unavailable", err);
+      return error(503, "verification_unavailable", "The verification service could not be reached; try again shortly", { "Retry-After": "30" });
+    }
+    if (!verified.success) {
+      return error(403, "verification_failed", `Turnstile rejected the token (${verified.errorCodes.join(", ") || "no reason given"}); reload and try again`);
+    }
+  }
 
   // When admissions are closed (storage warning, repository cap) only a repository that is
   // already registered gets through, and it is served as a resubmission.
@@ -193,6 +228,7 @@ async function listRepositorySources({ db }: App, repositoryId: number, url: URL
 /** POST /api/repositories/:id/jobs  body: { kind } -> 202 with the queued job */
 async function createRepositoryJob(request: Request, { db, queue }: App, repositoryId: number): Promise<Response> {
   const body = await readJson(request);
+  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
   if (body === undefined) return error(400, "invalid_input", "Request body must be JSON");
   const kind = typeof body === "object" && body !== null ? (body as { kind?: unknown }).kind : undefined;
   if (typeof kind !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(kind)) {
@@ -229,6 +265,7 @@ async function getEmbeddingStats({ db }: App, repositoryId: number): Promise<Res
 /** POST /api/search  body: { repositoryId, query, limit? } -> evidence cards, query embedded on the server */
 async function searchRepository(request: Request, { db, env, budget }: App): Promise<Response> {
   const body = await readJson(request);
+  if (body === BODY_TOO_LARGE) return error(413, "payload_too_large", `Request body must be at most ${MAX_BODY_BYTES} bytes`);
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return error(400, "invalid_input", "Request body must be a JSON object");
   }
@@ -293,10 +330,23 @@ function lookupError(lookup: Exclude<RepoLookup, { kind: "ok" }>): Response {
   }
 }
 
-/** Parsed JSON body, or undefined when the body is not valid JSON. */
+/** Request bodies are small JSON documents; anything larger is refused before it is parsed. */
+export const MAX_BODY_BYTES = 8192;
+const BODY_TOO_LARGE: unique symbol = Symbol("body too large");
+
+/** Parsed JSON body, undefined when it is not valid JSON, or BODY_TOO_LARGE past MAX_BODY_BYTES. */
 async function readJson(request: Request): Promise<unknown> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return BODY_TOO_LARGE;
+  let text: string;
   try {
-    return await request.json();
+    text = await request.text();
+  } catch {
+    return undefined;
+  }
+  if (text.length > MAX_BODY_BYTES) return BODY_TOO_LARGE;
+  try {
+    return JSON.parse(text);
   } catch {
     return undefined;
   }

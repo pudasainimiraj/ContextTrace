@@ -135,7 +135,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     const jobs = (repositoryId: number, body: unknown) =>
       exports.default.fetch(`http://localhost/api/repositories/${repositoryId}/jobs`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.ADMIN_TOKEN}` },
         body: JSON.stringify(body),
       });
 

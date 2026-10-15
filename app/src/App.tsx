@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { ApiError, CoverageReport, EvidenceCard, RepositoryRecord, SearchResponse, ServiceStatus, StreamCoverage } from "../shared/api.ts";
 import "./App.css";
 
@@ -8,9 +8,54 @@ type Phase =
   | { kind: "done"; repo: RepositoryRecord; created: boolean }
   | { kind: "error"; message: string };
 
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render(container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback"?: () => void; "error-callback"?: () => void }): string;
+      reset(widgetId?: string): void;
+    };
+  }
+}
+
+/** The Turnstile challenge, rendered only when a sitekey is configured; its token goes with the registration. */
+function TurnstileWidget({ onToken }: { onToken: (token: string | null) => void }) {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY || !container.current) return;
+    let cancelled = false;
+    const render = () => {
+      if (cancelled || !container.current || !window.turnstile) return;
+      window.turnstile.render(container.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: onToken,
+        "expired-callback": () => onToken(null),
+        "error-callback": () => onToken(null),
+      });
+    };
+    if (window.turnstile) {
+      render();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.onload = render;
+      document.head.appendChild(script);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [onToken]);
+  if (!TURNSTILE_SITE_KEY) return null;
+  return <div ref={container} className="turnstile" />;
+}
+
 function App() {
   const [url, setUrl] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const onToken = useCallback((token: string | null) => setTurnstileToken(token), []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -19,9 +64,12 @@ function App() {
       const res = await fetch("/api/repositories", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, ...(turnstileToken ? { turnstileToken } : {}) }),
       });
       const body = (await res.json()) as RepositoryRecord | ApiError;
+      // A Turnstile token is single-use: ask for a fresh one for the next submission.
+      window.turnstile?.reset();
+      setTurnstileToken(null);
       if (!res.ok) {
         const message = "message" in body ? body.message : `Request failed (${res.status})`;
         setPhase({ kind: "error", message });
@@ -47,10 +95,11 @@ function App() {
           aria-label="GitHub repository URL"
           required
         />
-        <button type="submit" disabled={phase.kind === "submitting"}>
+        <button type="submit" disabled={phase.kind === "submitting" || (Boolean(TURNSTILE_SITE_KEY) && !turnstileToken)}>
           {phase.kind === "submitting" ? "Checking…" : "Register"}
         </button>
       </form>
+      <TurnstileWidget onToken={onToken} />
       {phase.kind === "error" && (
         <p role="alert" className="error">
           {phase.message}

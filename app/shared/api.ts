@@ -215,6 +215,7 @@ export type ServiceStatus = {
   reasons: string[]; // one line per exhausted budget
   budgets: BudgetState[];
   admissions: { open: boolean; reason: string | null }; // whether a new repository can be registered now
+  protections: { turnstile: boolean; rate_limits: boolean; admin: boolean }; // what is enforced in this deployment
   generated_at: string;
 };
 
