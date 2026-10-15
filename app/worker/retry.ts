@@ -5,13 +5,15 @@ export class JobError extends Error {
   readonly code: string;
   readonly transient: boolean;
   readonly retryAfterSeconds?: number;
+  readonly data?: Record<string, unknown>; // structured detail, e.g. the exhausted budget
 
-  constructor(code: string, message: string, options: { transient: boolean; retryAfterSeconds?: number }) {
+  constructor(code: string, message: string, options: { transient: boolean; retryAfterSeconds?: number; data?: Record<string, unknown> }) {
     super(message);
     this.name = "JobError";
     this.code = code;
     this.transient = options.transient;
     this.retryAfterSeconds = options.retryAfterSeconds;
+    this.data = options.data;
   }
 }
 
@@ -40,6 +42,11 @@ export function jobErrorFromLookup(lookup: Exclude<RepoLookup, { kind: "ok" }>):
     case "upstream_error":
       return new JobError("upstream_error", lookup.message, {
         transient: lookup.status === 0 || lookup.status >= 500,
+      });
+    case "budget_exhausted":
+      return new JobError("budget_exhausted", "GitHub request budget for this hour is used up", {
+        transient: true,
+        retryAfterSeconds: lookup.retryAfterSeconds,
       });
     case "not_found":
       return new JobError("repository_not_found", "Repository not found or not public", { transient: false });

@@ -17,6 +17,7 @@ export type StreamCheckpoint = {
   last_synced_at: string | null;
   rescan_started_at: string | null; // a rescan is walking the listing from the start
   last_rescan_at: string | null;
+  capped_at: string | null; // the stream stopped at MAX_ITEMS_PER_STREAM and counts as complete
   pages_fetched: number;
   items_fetched: number;
   job_id: number | null;

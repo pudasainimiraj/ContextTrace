@@ -2,10 +2,26 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord, RepositoryStatus } from "../shared/api.ts";
 import type { GitHubRepo } from "./github-api.ts";
 
-/** Server-side Supabase client. The secret key bypasses RLS; never expose it to the browser. */
-export function createDb(env: Pick<Env, "SUPABASE_URL" | "SUPABASE_SECRET_KEY">): SupabaseClient {
+/** Counts the bytes Supabase sends back (Content-Length, when present), for the egress budget. */
+export type EgressMeter = { bytes: number };
+
+/**
+ * Server-side Supabase client. The secret key bypasses RLS; never expose it to the browser.
+ * With a meter, every response's Content-Length is added to it; the handler settles the
+ * total against the egress budget once, when it is done.
+ */
+export function createDb(env: Pick<Env, "SUPABASE_URL" | "SUPABASE_SECRET_KEY">, meter?: EgressMeter): SupabaseClient {
+  const fetch: typeof globalThis.fetch = meter
+    ? async (input, init) => {
+        const res = await globalThis.fetch(input, init);
+        const length = Number(res.headers.get("content-length"));
+        if (Number.isFinite(length) && length > 0) meter.bytes += length;
+        return res;
+      }
+    : (input, init) => globalThis.fetch(input, init);
   return createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch },
   });
 }
 

@@ -92,7 +92,7 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository status", () => {
     await saveCheckpoint(db, { repository_id: REPO, stream: STREAMS[2], cursor: null, backfill_done_at: done });
     expect(await refreshRepositoryStatus(db, REPO, TRANSFORM_VERSION)).toBe("searchable");
     const response = await searchFor(TEXTS[1]);
-    expect(response.index).toEqual({ status: "searchable", partial: false, embedded: 3, pending: 0, warning: null });
+    expect(response.index).toEqual({ status: "searchable", partial: false, embedded: 3, pending: 0, capped_streams: [], warning: null });
   });
 
   it("keeps searchable when a later sync adds passages that still wait for a vector", async () => {

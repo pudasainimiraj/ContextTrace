@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RepositoryRecord, SearchConfidence, SearchIndexState, SearchMode, SearchResponse } from "../shared/api.ts";
+import { type Budget, milliNeuronsFor, QUERY_RESERVE_MILLI_NEURONS } from "./budget.ts";
+import { listCheckpoints } from "./checkpoints.ts";
 import { embeddingStats } from "./embed.ts";
+import { MAX_ITEMS_PER_STREAM } from "./extract.ts";
 import { type EmbeddingClient, validateVector } from "./embeddings.ts";
 import { resolveEvidence } from "./evidence.ts";
 import { JobError } from "./retry.ts";
@@ -19,7 +22,7 @@ export const MAX_QUERY_CHARS = 500;
 export const SCORE_HIGH = 0.8;
 export const SCORE_LOW = 0.7;
 
-export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient };
+export type SearchContext = { db: SupabaseClient; embeddings?: EmbeddingClient; budget?: Budget };
 export type SearchRequest = { repository: RepositoryRecord; query: string; limit?: number };
 
 export type SearchMatch = {
@@ -41,9 +44,12 @@ export function belongsToRepository(documentId: string, repositoryId: number): b
 export async function embedQuery(
   embeddings: EmbeddingClient | undefined,
   query: string,
+  budget?: Budget,
 ): Promise<{ vector: number[]; durationMs: number }> {
   if (!embeddings) throw new JobError("ai_not_configured", "No embedding client is configured", { transient: false });
+  if (budget) await budget.take("ai_neurons_milli", QUERY_RESERVE_MILLI_NEURONS);
   const result = await embeddings.embed([query]);
+  if (budget && result.tokens !== undefined) await budget.settle("ai_neurons_milli", milliNeuronsFor(result.tokens) - QUERY_RESERVE_MILLI_NEURONS);
   const vector = result.vectors[0];
   const problem = validateVector(vector);
   if (problem) throw new JobError("ai_invalid_output", `Query vector is ${problem}`, { transient: false });
@@ -62,9 +68,18 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
   const query = request.query.trim();
   const limit = Math.min(Math.max(request.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
 
-  const [semantic, stats] = await Promise.all([semanticSearch(ctx, repositoryId, query, limit), embeddingStats(ctx.db, repositoryId)]);
-  const index = indexState(repository, stats);
+  const [semantic, stats, checkpoints] = await Promise.all([
+    semanticSearch(ctx, repositoryId, query, limit),
+    embeddingStats(ctx.db, repositoryId),
+    listCheckpoints(ctx.db, repositoryId),
+  ]);
+  const index = indexState(repository, stats, checkpoints.filter((c) => c.capped_at).map((c) => c.stream));
   const top = semantic.hits[0]?.score ?? 0;
+  const unavailable = !semantic.error
+    ? null
+    : semantic.error === "budget_exhausted"
+      ? `Semantic search is paused until ${semantic.resetsAt ?? "the next budget window"} (inference budget reached).`
+      : `Semantic search is unavailable (${semantic.error}).`;
 
   let mode: SearchMode;
   let confidence: SearchConfidence;
@@ -78,8 +93,8 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
     if (keyword.length > 0) {
       [mode, confidence, hits] = ["keyword", "low", keyword];
       message = `${
-        semantic.error
-          ? `Semantic search is unavailable (${semantic.error}).`
+        unavailable
+          ? unavailable
           : building
             ? `The semantic index is still building (${index.embedded} of ${stats.passages} passages).`
             : "No discussion is a close semantic match."
@@ -89,8 +104,8 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
       message = "Only weak matches were found. This repository may not discuss the topic; verify them at the source before relying on them.";
     } else {
       [mode, confidence, hits] = ["none", "none", []];
-      message = semantic.error
-        ? `Semantic search is unavailable (${semantic.error}) and no passage contains your search words.`
+      message = unavailable
+        ? `${unavailable.replace(/\.$/, "")} and no passage contains your search words.`
         : stats.passages === 0
           ? "This repository has no indexed discussions yet; extraction may still be running."
           : building
@@ -115,39 +130,48 @@ export async function search(ctx: SearchContext, request: SearchRequest): Promis
   };
 }
 
-/** The index state for the response: a repository that is not fully searchable says so explicitly. */
-export function indexState(repository: RepositoryRecord, stats: { passages: number; embedded: number; pending: number }): SearchIndexState {
+/** The index state for the response: a repository that is not fully searchable, or capped, says so explicitly. */
+export function indexState(
+  repository: RepositoryRecord,
+  stats: { passages: number; embedded: number; pending: number },
+  cappedStreams: string[] = [],
+): SearchIndexState {
   const { status } = repository;
-  const base = { status, partial: status !== "searchable", embedded: stats.embedded, pending: stats.pending };
-  switch (status) {
-    case "searchable":
-      return { ...base, warning: null };
-    case "inaccessible":
-      return { ...base, warning: "The source repository is no longer accessible on GitHub; results reflect the last successful sync and may be stale." };
-    case "searchable_partial":
-      return {
-        ...base,
-        warning: `Partial index: ${stats.embedded} of ${stats.passages} passages are searchable while extraction and indexing continue; older discussions may be missing.`,
-      };
-    default:
-      return { ...base, warning: "The index is still being built; nothing from this repository is searchable yet." };
-  }
+  const base = { status, partial: status !== "searchable", embedded: stats.embedded, pending: stats.pending, capped_streams: cappedStreams };
+  const statusWarning = (() => {
+    switch (status) {
+      case "searchable":
+        return null;
+      case "inaccessible":
+        return "The source repository is no longer accessible on GitHub; results reflect the last successful sync and may be stale.";
+      case "searchable_partial":
+        return `Partial index: ${stats.embedded} of ${stats.passages} passages are searchable while extraction and indexing continue; older discussions may be missing.`;
+      default:
+        return "The index is still being built; nothing from this repository is searchable yet.";
+    }
+  })();
+  const capWarning =
+    cappedStreams.length > 0
+      ? `Coverage is capped at ${MAX_ITEMS_PER_STREAM.toLocaleString("en-US")} items per stream (${cappedStreams.join(", ")}); older discussions are not indexed.`
+      : null;
+  return { ...base, warning: [statusWarning, capWarning].filter((w): w is string => w !== null).join(" ") || null };
 }
 
-/** The semantic hits, or the error code that stopped them; only the model's own failures are caught. */
+/** The semantic hits, or the error code that stopped them; only the model's own failures and budget refusals are caught. */
 async function semanticSearch(
   ctx: SearchContext,
   repositoryId: number,
   query: string,
   limit: number,
-): Promise<{ hits: SearchMatch[]; embedMs: number | null; error: string | null }> {
+): Promise<{ hits: SearchMatch[]; embedMs: number | null; error: string | null; resetsAt: string | null }> {
   try {
-    const { vector, durationMs } = await embedQuery(ctx.embeddings, query);
-    return { hits: await searchSemantic(ctx.db, repositoryId, vector, limit), embedMs: durationMs, error: null };
+    const { vector, durationMs } = await embedQuery(ctx.embeddings, query, ctx.budget);
+    return { hits: await searchSemantic(ctx.db, repositoryId, vector, limit), embedMs: durationMs, error: null, resetsAt: null };
   } catch (err) {
     if (!(err instanceof JobError)) throw err;
     console.error(`semantic search unavailable: ${err.code}: ${err.message}`);
-    return { hits: [], embedMs: null, error: err.code };
+    const resetsAt = typeof err.data?.resets_at === "string" ? err.data.resets_at : null;
+    return { hits: [], embedMs: null, error: err.code, resetsAt };
   }
 }
 

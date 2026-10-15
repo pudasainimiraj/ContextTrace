@@ -141,6 +141,7 @@ export type SearchIndexState = {
   partial: boolean; // true unless the status is searchable
   embedded: number; // passages with a current vector
   pending: number; // passages waiting for one
+  capped_streams: string[]; // streams that stopped at the item cap
   warning: string | null;
 };
 
@@ -174,6 +175,8 @@ export type StreamCoverage = {
   sync_in_progress: boolean; // a sync left a cursor behind
   rescan_in_progress: boolean;
   last_rescan_at: string | null; // when deleted sources were last reconciled
+  capped: boolean; // stopped at the per-stream item cap; counts as complete, older items are not indexed
+  capped_at: string | null;
   pages_fetched: number;
   items_fetched: number;
 };
@@ -193,6 +196,26 @@ export type CoverageReport = {
   completed_source_types: SourceType[]; // types whose stream has been listed to the end
   last_successful_sync_at: string | null; // every stream had completed a head or sync run by this time
   jobs: { queued: number; running: number; retry_pending: number; failed: number };
+};
+
+/** One metered resource as the budget ledger sees it now. */
+export type BudgetState = {
+  resource: string;
+  period: "hour" | "day" | "month" | "gauge";
+  used: number;
+  limit: number;
+  remaining_pct: number;
+  paused: boolean; // used >= limit: reservations are refused until resets_at
+  resets_at: string | null; // null for a gauge
+};
+
+/** GET /api/status: whether the service is pausing itself, and why. Never carries a secret. */
+export type ServiceStatus = {
+  paused: boolean;
+  reasons: string[]; // one line per exhausted budget
+  budgets: BudgetState[];
+  admissions: { open: boolean; reason: string | null }; // whether a new repository can be registered now
+  generated_at: string;
 };
 
 /** Embedding coverage and metering for one repository. */

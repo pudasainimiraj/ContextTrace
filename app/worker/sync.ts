@@ -1,17 +1,27 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Budget } from "./budget.ts";
 import { BACKFILL_DELAY_SECONDS, fetchKind, rescanKind } from "./extract.ts";
 import { ensureQueuedJob, type JobQueue } from "./jobs.ts";
 
-/** How old a stream's last completed run may be before the cron syncs it again. */
-export const SYNC_INTERVAL_SECONDS = 15 * 60;
+/** How old a stream's last completed run may be before the cron syncs it again. Hourly: a sync and its chain cost queue operations. */
+export const SYNC_INTERVAL_SECONDS = 60 * 60;
+/** Below this share of the day's queue budget the schedulers queue nothing more. */
+export const QUEUE_BUDGET_RESERVE_PCT = 20;
 /** How old a stream's last rescan (or its backfill) may be before it is walked again for deletions. */
 export const RESCAN_INTERVAL_SECONDS = 7 * 24 * 3600;
 /** Streams queued per cron tick; the rest are picked up by the next tick. */
 export const SYNC_BATCH_LIMIT = 50;
 
 export type DueStream = { repository_id: number; stream: string };
-export type SyncOptions = { intervalSeconds?: number; limit?: number; repositoryId?: number };
-export type SyncSchedule = { due: number; queued: (DueStream & { job_id: number })[] };
+export type SyncOptions = { intervalSeconds?: number; limit?: number; repositoryId?: number; budget?: Budget };
+export type SyncSchedule = { due: number; queued: (DueStream & { job_id: number })[]; deferred?: boolean };
+
+/** True when less than QUEUE_BUDGET_RESERVE_PCT of the day's queue operations remain. */
+export async function queueBudgetLow(budget: Budget | undefined): Promise<boolean> {
+  if (!budget) return false;
+  const queue = (await budget.summary()).find((b) => b.resource === "queue_ops");
+  return queue !== undefined && queue.remaining_pct < QUEUE_BUDGET_RESERVE_PCT;
+}
 
 /** Streams of searchable repositories whose last completed run is older than the interval. */
 export async function dueStreams(db: SupabaseClient, options: SyncOptions = {}): Promise<DueStream[]> {
@@ -31,6 +41,7 @@ export async function dueStreams(db: SupabaseClient, options: SyncOptions = {}):
  * source becomes searchable again without anyone re-indexing by hand.
  */
 export async function scheduleSyncs(db: SupabaseClient, queue: JobQueue, options: SyncOptions = {}): Promise<SyncSchedule> {
+  if (await queueBudgetLow(options.budget)) return { due: 0, queued: [], deferred: true };
   const due = await dueStreams(db, options);
   const queued: SyncSchedule["queued"] = [];
   for (const stream of due) {
@@ -57,6 +68,7 @@ export async function dueRescans(db: SupabaseClient, options: SyncOptions = {}):
  * deleted, so this is how removed comments and issues leave the index.
  */
 export async function scheduleRescans(db: SupabaseClient, queue: JobQueue, options: SyncOptions = {}): Promise<SyncSchedule> {
+  if (await queueBudgetLow(options.budget)) return { due: 0, queued: [], deferred: true };
   const due = await dueRescans(db, options);
   const queued: SyncSchedule["queued"] = [];
   for (const stream of due) {

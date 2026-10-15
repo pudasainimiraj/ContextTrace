@@ -1,3 +1,5 @@
+import { type Budget, budgetExhausted, githubResource } from "./budget.ts";
+
 /**
  * Public-repository validation against the GitHub REST API.
  *
@@ -21,11 +23,13 @@ export type RepoLookup =
   | { kind: "not_found" } // 404: nonexistent, or private when unauthenticated
   | { kind: "private" } // 200 with private: true (only visible with a token)
   | { kind: "rate_limited"; retryAfterSeconds: number }
+  | { kind: "budget_exhausted"; retryAfterSeconds: number } // our own GitHub request budget for the hour
   | { kind: "upstream_error"; status: number; message: string };
 
 export type LookupOptions = {
   fetch?: typeof globalThis.fetch;
   token?: string;
+  budget?: Budget;
 };
 
 const API_ROOT = "https://api.github.com";
@@ -43,6 +47,12 @@ export async function lookupPublicRepository(
     "User-Agent": "contexttrace-worker",
   };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  if (opts.budget) {
+    const reservation = await opts.budget.reserve(githubResource(opts.token), 1);
+    if (!reservation.allowed) {
+      return { kind: "budget_exhausted", retryAfterSeconds: budgetExhausted(githubResource(opts.token), reservation).retryAfterSeconds ?? 60 };
+    }
+  }
 
   let res: Response;
   try {

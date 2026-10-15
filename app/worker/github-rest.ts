@@ -1,3 +1,4 @@
+import { type Budget, githubResource } from "./budget.ts";
 import { messageOf, rateLimitWait } from "./github-api.ts";
 import { JobError } from "./retry.ts";
 
@@ -11,7 +12,7 @@ export type GitHubPage<T> = {
   resetAt: number | null; // X-RateLimit-Reset, epoch seconds
 };
 
-export type GitHubOptions = { token?: string; fetch?: typeof globalThis.fetch };
+export type GitHubOptions = { token?: string; fetch?: typeof globalThis.fetch; budget?: Budget };
 
 /**
  * Fetches one page of a GitHub list endpoint. Rate limits (primary and secondary),
@@ -26,6 +27,8 @@ export async function githubGetPage<T>(url: string, opts: GitHubOptions = {}): P
     "User-Agent": "contexttrace-worker",
   };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  // The request is reserved before it is made; a refusal parks the job until the hour resets.
+  if (opts.budget) await opts.budget.take(githubResource(opts.token), 1);
 
   let res: Response;
   try {

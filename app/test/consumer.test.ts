@@ -23,7 +23,8 @@ async function deliver(messages: FakeMessage[]): Promise<void> {
 /** Delivers the messages to the Worker's queue handler the way the runtime would. */
 async function deliverToHandler(messages: FakeMessage[]): Promise<void> {
   const batch = { queue: "contexttrace-jobs", messages, ackAll: vi.fn(), retryAll: vi.fn() };
-  await worker.queue(batch as unknown as MessageBatch<JobMessage>, env);
+  const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+  await worker.queue(batch as unknown as MessageBatch<JobMessage>, env, ctx);
 }
 
 async function queuedJob(): Promise<JobRecord> {

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { ApiError, CoverageReport, EvidenceCard, RepositoryRecord, SearchResponse, StreamCoverage } from "../shared/api.ts";
+import type { ApiError, CoverageReport, EvidenceCard, RepositoryRecord, SearchResponse, ServiceStatus, StreamCoverage } from "../shared/api.ts";
 import "./App.css";
 
 type Phase =
@@ -36,6 +36,7 @@ function App() {
   return (
     <main>
       <h1>ContextTrace</h1>
+      <StatusBanner />
       <p>Register a public GitHub repository to trace.</p>
       <form onSubmit={onSubmit}>
         <input
@@ -87,6 +88,37 @@ function RepositoryStatus({ repo, created }: { repo: RepositoryRecord; created: 
         <dd>{repo.created_at}</dd>
       </dl>
     </section>
+  );
+}
+
+const STATUS_POLL_MS = 60_000;
+
+/** Says when the service is pausing itself at a budget cap, or not taking new repositories, and why. */
+function StatusBanner() {
+  const [status, setStatus] = useState<ServiceStatus | null>(null);
+  useEffect(() => {
+    let active = true;
+    async function poll() {
+      try {
+        const res = await fetch("/api/status");
+        if (res.ok && active) setStatus((await res.json()) as ServiceStatus);
+      } catch {
+        // The banner is informational; a failed poll shows nothing.
+      }
+    }
+    void poll();
+    const timer = setInterval(() => void poll(), STATUS_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+  if (!status || (!status.paused && status.admissions.open)) return null;
+  return (
+    <p role="status" className="notice warning">
+      {status.paused ? `Paused at a free-tier budget: ${status.reasons.join("; ")}. The service resumes by itself.` : null}
+      {!status.admissions.open ? ` ${status.admissions.reason}.` : null}
+    </p>
   );
 }
 

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { vi } from "vitest";
+import { Budget, type BudgetResource } from "../worker/budget.ts";
 import type { PendingPassage } from "../worker/embed.ts";
 import { contentHash } from "../worker/passages.ts";
 import { upsertSources } from "../worker/sources.ts";
@@ -148,4 +149,45 @@ export async function insertPassages(
   const { error } = await db.from("passages").insert(rows);
   if (error) throw new Error(error.message);
   return rows.map((r) => ({ passage_id: r.passage_id, text: r.text, token_count: r.token_count, content_hash: r.content_hash }));
+}
+
+/** The production limits, so a scoped test ledger behaves like the global one unless overridden. */
+export const BUDGET_DEFAULTS: Record<BudgetResource, { period: "hour" | "day" | "month" | "gauge"; limit: number }> = {
+  ai_neurons_milli: { period: "day", limit: 8_000_000 },
+  github_requests_auth: { period: "hour", limit: 4000 },
+  github_requests_anon: { period: "hour", limit: 48 },
+  queue_ops: { period: "day", limit: 8000 },
+  searches: { period: "day", limit: 20_000 },
+  registrations: { period: "day", limit: 50 },
+  db_egress_bytes: { period: "month", limit: 4_000_000_000 },
+  storage_bytes: { period: "gauge", limit: 400_000_000 },
+};
+
+/** Seeds every budget row under its own scope, so parallel test files never share a ledger. */
+export async function seedBudget(db: SupabaseClient, scope: string, limits: Partial<Record<BudgetResource, number>> = {}): Promise<Budget> {
+  const rows = Object.entries(BUDGET_DEFAULTS).map(([resource, d]) => ({
+    scope,
+    resource,
+    period: d.period,
+    limit_amount: limits[resource as BudgetResource] ?? d.limit,
+    window_start: new Date().toISOString(),
+  }));
+  const { error } = await db.from("usage_budgets").insert(rows);
+  if (error) throw new Error(error.message);
+  return new Budget(db, scope);
+}
+
+export async function dropBudget(db: SupabaseClient, scope: string): Promise<void> {
+  await db.from("usage_budgets").delete().eq("scope", scope);
+}
+
+/** A test double for the handler's ExecutionContext. */
+export function fakeExecutionContext(): ExecutionContext {
+  return { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+}
+
+/** Fills a resource of a scoped ledger up to its limit. */
+export async function exhaustBudget(budget: Budget, resource: BudgetResource): Promise<void> {
+  const state = (await budget.summary()).find((b) => b.resource === resource)!;
+  await budget.settle(resource, state.limit - state.used);
 }
