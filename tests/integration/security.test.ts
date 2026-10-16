@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import envExample from "../../.env.example?raw";
 import headersFile from "../../web/public/_headers?raw";
-import appSource from "../../web/src/App.tsx?raw";
 import wranglerConfig from "../../wrangler.jsonc?raw";
 import type { ApiError } from "../../shared/api.ts";
 import { consumeJobMessage } from "../../worker/src/queue/consumer.ts";
@@ -16,6 +15,9 @@ import { createDb, upsertRepository } from "../../worker/src/api/repositories.ts
 import { searchSemantic } from "../../worker/src/api/search.ts";
 import { JOB_KINDS } from "../../worker/src/api/validate.ts";
 import { expectNoSecrets, fakeExecutionContext, fakeGitHubPages, fakeMessage, insertPassages, repoFixture, SECRET_ENV_NAMES } from "./helpers.ts";
+
+// Every component of the app, so a new file cannot slip past the no-raw-HTML rule.
+const appSources = import.meta.glob("../../web/src/**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
 // Runs against the real Supabase project; see jobs.test.ts for the id scheme.
 const REPO = Date.now() * 100 + 13;
@@ -55,8 +57,11 @@ describe("configuration", () => {
   });
 
   it("renders text only: no raw HTML in the app, and a strict policy on the static assets", () => {
-    expect(appSource).not.toMatch(/dangerouslySetInnerHTML|innerHTML/);
-    expect(appSource).toMatch(/rel="noreferrer"/);
+    expect(Object.keys(appSources).length).toBeGreaterThan(0);
+    for (const [file, source] of Object.entries(appSources)) {
+      expect(source, file).not.toMatch(/dangerouslySetInnerHTML|innerHTML/);
+      if (/target="_blank"/.test(source)) expect(source, file).toMatch(/rel="noreferrer"/);
+    }
     expect(headersFile).toMatch(/^\/\*$/m);
     expect(headersFile).toMatch(/Content-Security-Policy: default-src 'self'; script-src 'self' https:\/\/challenges\.cloudflare\.com;/);
     expect(headersFile).toMatch(/frame-ancestors 'none'/);
@@ -69,7 +74,7 @@ describe("configuration", () => {
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("responses", () => {
   it("carry nosniff and no-store on success and on error, and never a secret", async () => {
-    for (const path of ["/api/health", "/api/status", `/api/repositories/${REPO}`, `/api/repositories/${REPO}/coverage`, `/api/repositories/${REPO}/sources`, `/api/repositories/${REPO}/passages?limit=2`, `/api/repositories/${REPO}/embeddings/stats`, "/api/repositories/1/coverage", "/nope"]) {
+    for (const path of ["/api/health", "/api/status", "/api/repositories", "/api/repositories/by-name/alice/security", "/api/repositories/by-name/no/such", `/api/repositories/${REPO}`, `/api/repositories/${REPO}/coverage`, `/api/repositories/${REPO}/sources`, `/api/repositories/${REPO}/passages?limit=2`, `/api/repositories/${REPO}/embeddings/stats`, "/api/repositories/1/coverage", "/nope"]) {
       const res = await call(path);
       expect(res.headers.get("X-Content-Type-Options"), path).toBe("nosniff");
       expect(res.headers.get("Cache-Control"), path).toBe("no-store");

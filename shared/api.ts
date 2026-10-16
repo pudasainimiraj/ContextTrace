@@ -21,6 +21,26 @@ export type RepositoryRecord = {
   updated_at: string;
 };
 
+/** One row of GET /api/repositories: enough for the list on the home page, nothing per passage. */
+export type RepositorySummary = {
+  id: number;
+  full_name: string;
+  status: RepositoryStatus;
+  status_changed_at: string;
+  last_error: string | null;
+  passages: number;
+  embedded: number; // passages with a current vector
+  pending: number; // passages waiting for one
+  last_successful_sync_at: string | null; // every stream had completed a head or sync run by this time
+  active_jobs: ActiveJob[]; // queued, running or retry_pending
+};
+
+/** GET /api/repositories: every repository that is not removed, active ones first, and the admission capacity. */
+export type RepositoryListResponse = {
+  repositories: RepositorySummary[];
+  capacity: { used: number; max: number }; // used counts the same rows as the admission check
+};
+
 export type ApiError = {
   error: string;
   message: string;
@@ -185,6 +205,27 @@ export type StreamCoverage = {
   items_fetched: number;
 };
 
+/** A job that is queued, running or parked for a retry. Never carries the error message: it may name internal calls. */
+export type ActiveJob = {
+  kind: string;
+  state: "queued" | "running" | "retry_pending";
+  error_code: string | null; // budget_exhausted marks a budget pause
+  next_attempt_at: string | null;
+  started_at: string | null;
+  attempt: number;
+  lease_until: string | null; // a running job past its lease is stalled until the cron recovers it
+};
+
+/** The newest succeeded run of one job kind, from the job's stored result. */
+export type LastRun = {
+  kind: string;
+  finished_at: string;
+  pages: number | null;
+  records: number | null;
+  inserted: number | null;
+  duration_ms: number | null;
+};
+
 /** GET /api/repositories/:id/coverage: what is stored, what is searchable, and how current it is. */
 export type CoverageReport = {
   repository_id: number;
@@ -200,6 +241,9 @@ export type CoverageReport = {
   completed_source_types: SourceType[]; // types whose stream has been listed to the end
   last_successful_sync_at: string | null; // every stream had completed a head or sync run by this time
   jobs: { queued: number; running: number; retry_pending: number; failed: number };
+  active_jobs: ActiveJob[];
+  last_runs: LastRun[];
+  paused_until: string | null; // the latest reset time among exhausted budgets, when any is exhausted
 };
 
 /** One metered resource as the budget ledger sees it now. */
@@ -217,6 +261,7 @@ export type BudgetState = {
 export type ServiceStatus = {
   paused: boolean;
   reasons: string[]; // one line per exhausted budget
+  deferred: string[]; // one line per scheduler that is holding back without a budget being exhausted
   budgets: BudgetState[];
   admissions: { open: boolean; reason: string | null }; // whether a new repository can be registered now
   protections: { turnstile: boolean; rate_limits: boolean; admin: boolean }; // what is enforced in this deployment

@@ -134,10 +134,10 @@ export async function finishJob(
 }
 
 /**
- * Creates and enqueues a job of `kind` unless one is already queued or waiting to retry
- * for the repository; returns null in that case. A running job does not block: it may have
- * chosen its work before the latest data landed, and a duplicate run that finds nothing to
- * do is cheap.
+ * Creates and enqueues a job of `kind` unless one is already active for the repository
+ * (queued, running or waiting to retry); returns null in that case. The chain therefore
+ * runs one job of a kind per repository at a time. What lands while a job runs is picked
+ * up by its continuation, or by the cron's catch-up sweep when the hand-off missed it.
  */
 export async function ensureQueuedJob(
   db: SupabaseClient,
@@ -146,15 +146,25 @@ export async function ensureQueuedJob(
   kind: string,
   options: { delaySeconds?: number } = {},
 ): Promise<JobRecord | null> {
+  // A running job counts as active: without it every backfill run that finished while a
+  // transform was running queued another transform, and a large repository ran 25 of them
+  // at once over the same dirty threads (ClickHouse, 2026-10-16).
   const { data, error } = await db
     .from("jobs")
     .select("id")
     .eq("repository_id", repositoryId)
     .eq("kind", kind)
-    .in("state", ["queued", "retry_pending"])
+    .in("state", ["queued", "running", "retry_pending"])
     .limit(1);
   if (error) throw dbError("select jobs", error);
   if (data && data.length > 0) return null;
   const job = await createJob(db, repositoryId, kind);
   return enqueueJob(db, queue, job.id, options);
+}
+
+/** Whether the repository has ever had a fetch job (head pass or sync), in any state. */
+export async function hasFetchJobs(db: SupabaseClient, repositoryId: number): Promise<boolean> {
+  const { count, error } = await db.from("jobs").select("id", { count: "exact", head: true }).eq("repository_id", repositoryId).like("kind", "fetch\\_%");
+  if (error) throw dbError("count jobs", error);
+  return (count ?? 0) > 0;
 }

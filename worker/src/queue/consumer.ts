@@ -4,12 +4,12 @@ import { EMBED_JOB_KIND, embedPassages } from "../etl/embed.ts";
 import type { Budget } from "./budget.ts";
 import type { EmbeddingClient } from "../etl/embeddings.ts";
 import { BACKFILL_DELAY_SECONDS, extractStream, STREAM_KINDS } from "../etl/extract.ts";
-import { claimJob, createJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
+import { claimJob, enqueueJob, ensureQueuedJob, finishJob, type JobMessage, type JobQueue } from "./jobs.ts";
 import { nextJobKind } from "./pipeline.ts";
 import { storagePause, storageState } from "../cron/maintenance.ts";
 import { getRepository, markRepositoryInaccessible } from "../api/repositories.ts";
 import { backoffSeconds, classifyError, JobError, MAX_ATTEMPTS } from "./retry.ts";
-import { TRANSFORM_JOB_KIND, transformRepository } from "../etl/transform.ts";
+import { documentsPerRun, TRANSFORM_JOB_KIND, transformRepository } from "../etl/transform.ts";
 
 export type JobContext = {
   db: SupabaseClient;
@@ -36,7 +36,7 @@ export type ConsumerContext = JobContext & { queue: JobQueue; run?: JobRunner };
 /** Job kinds that are not extraction streams. */
 const RUNNERS: Record<string, JobRunner> = {
   [TRANSFORM_JOB_KIND]: async (job, ctx) => {
-    const { done, ...result } = await transformRepository(ctx.db, job.repository_id);
+    const { done, ...result } = await transformRepository(ctx.db, job.repository_id, { limit: documentsPerRun(job.attempt) });
     return { done, result, changed: result.documents > 0 };
   },
   [EMBED_JOB_KIND]: async (job, ctx) => {
@@ -134,10 +134,9 @@ export async function consumeJobMessage(
     const result = { ...outcome.result, durationMs: Date.now() - startedAt };
     await finishJob(ctx.db, job.id, owner, { state: "succeeded", result });
     console.log("job succeeded", { id: job.id, kind: job.kind, repositoryId: job.repository_id, attempt: job.attempt, durationMs: result.durationMs });
-    if (!outcome.done) {
-      const next = await createJob(ctx.db, job.repository_id, job.kind);
-      await enqueueJob(ctx.db, ctx.queue, next.id, { delaySeconds: continuationDelaySeconds(job.kind) });
-    }
+    // The continuation is one more job of the same kind, unless one is already active
+    // (queued, running or parked): the job finished above, so it does not block itself.
+    if (!outcome.done) await ensureQueuedJob(ctx.db, ctx.queue, job.repository_id, job.kind, { delaySeconds: continuationDelaySeconds(job.kind) });
     await queueFollowUps(ctx, job, outcome.followUps ?? [], outcome.changed ?? true);
   } catch (err) {
     const failure = classifyError(err);

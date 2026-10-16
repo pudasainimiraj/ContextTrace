@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobRecord, RepositoryRecord } from "../../shared/api.ts";
-import { createDb } from "../../worker/src/api/repositories.ts";
+import { createDb, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { jsonResponse, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project with GitHub stubbed. Ids sit far above
@@ -12,6 +12,7 @@ const ID_DAGSTER = Date.now() * 100 + 50;
 const ID_RENAMED = ID_DAGSTER + 1;
 const ID_PRIVATE = ID_DAGSTER + 2;
 const ID_MISSING = ID_DAGSTER + 3;
+const ID_NOJOBS = ID_DAGSTER + 4;
 
 type FetchInput = Parameters<typeof globalThis.fetch>[0];
 type FetchInit = Parameters<typeof globalThis.fetch>[1];
@@ -25,6 +26,8 @@ const fakeGitHub = vi.fn<typeof globalThis.fetch>(async (input) => {
   switch (new URL(hrefOf(input)).pathname) {
     case "/repos/dagster-io/dagster":
       return jsonResponse(200, repoFixture({ id: ID_DAGSTER }));
+    case "/repos/dagster-io/nojobs":
+      return jsonResponse(200, repoFixture({ id: ID_NOJOBS, full_name: "dagster-io/nojobs" }));
     case "/repos/old-org/old-name": // GitHub redirects to the new name; fetch follows it
     case "/repos/new-org/new-name":
       return jsonResponse(200, repoFixture({ id: ID_RENAMED, full_name: "new-org/new-name" }));
@@ -59,7 +62,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 afterAll(async () => {
-  await createDb(env).from("repositories").delete().in("id", [ID_DAGSTER, ID_RENAMED]);
+  await createDb(env).from("repositories").delete().in("id", [ID_DAGSTER, ID_RENAMED, ID_NOJOBS]);
 });
 
 function post(url: unknown, rawBody?: string): Promise<Response> {
@@ -128,6 +131,24 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     expect(res.status).toBe(200);
     expect((await res.json()) as RepositoryRecord).toMatchObject({ id: ID_DAGSTER, status: "registered", last_error: null });
     expect((await fetchJobs()) - jobsBefore).toBe(3); // one fetch job per stream, as at registration
+  });
+
+  it("starts extraction for a resubmitted repository that never had a fetch job", async () => {
+    const db = createDb(env);
+    // Registered before the job system existed: the row is there and no job was ever queued.
+    await upsertRepository(db, repoFixture({ id: ID_NOJOBS, full_name: "dagster-io/nojobs" }));
+    const fetchJobs = async () =>
+      (await db.from("jobs").select("id", { count: "exact", head: true }).eq("repository_id", ID_NOJOBS).like("kind", "fetch_%")).count ?? 0;
+    expect(await fetchJobs()).toBe(0);
+
+    const res = await post("https://github.com/dagster-io/nojobs");
+    expect(res.status).toBe(200);
+    expect((await res.json()) as RepositoryRecord).toMatchObject({ id: ID_NOJOBS, submission_count: 2 });
+    expect(await fetchJobs()).toBe(3); // one fetch job per stream, as at registration
+
+    // Once the chain exists a resubmission queues nothing more.
+    await post("https://github.com/dagster-io/nojobs");
+    expect(await fetchJobs()).toBe(3);
   });
 
   it("creates and enqueues a job for a registered repository", async () => {

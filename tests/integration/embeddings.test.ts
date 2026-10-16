@@ -9,6 +9,7 @@ import {
   FakeEmbeddingClient,
   fakeVector,
   neuronsFor,
+  secondsUntilUtcMidnight,
   usdFor,
   validateVector,
   WorkersAiEmbeddingClient,
@@ -86,6 +87,18 @@ describe("WorkersAiEmbeddingClient", () => {
     const err = await failure(client.embed(Array.from({ length: EMBEDDING_BATCH_SIZE + 1 }, () => "x")));
     expect(err).toMatchObject({ code: "ai_bad_request", transient: false });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("parks the job until 00:00 UTC when Workers AI's daily free allocation is used up", async () => {
+    const message = "AiError: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan";
+    const err = await failure(clientWith(jsonResponse(429, { success: false, errors: [{ message }] })).client.embed(["a"]));
+    expect(err).toMatchObject({ code: "budget_exhausted", transient: true });
+    expect(err.message).toContain("daily free allocation");
+    expect(err.retryAfterSeconds).toBeGreaterThanOrEqual(60);
+    expect(err.retryAfterSeconds).toBeLessThanOrEqual(24 * 3600);
+    // The helper: one minute at least, never more than a day, and exactly the gap to midnight otherwise.
+    expect(secondsUntilUtcMidnight(Date.UTC(2026, 9, 16, 23, 59, 30))).toBe(60);
+    expect(secondsUntilUtcMidnight(Date.UTC(2026, 9, 16, 22, 0, 0))).toBe(7200);
   });
 
   it("maps 429 to a transient ai_rate_limited with Retry-After, defaulting to 60", async () => {

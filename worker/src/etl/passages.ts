@@ -120,12 +120,22 @@ export function reviewPositions(comments: UnitInput[]): Map<number, number> {
 
 export type BuildOptions = { maxTokens: number; countTokens: TokenCounter; tokenizer: string };
 export type PassageDraft = Omit<PassageRecord, "content_hash" | "transform_version" | "index_state" | "updated_at">;
-export type BuildResult = { passages: PassageDraft[]; units: number; skipped: number };
+export type BuildResult = { passages: PassageDraft[]; units: number; skipped: number; truncated: number };
+
+/**
+ * Characters of a unit's body that are indexed. GitHub allows 65,536; a body beyond this
+ * cap is almost always a pasted log or stack trace, and tokenizing it is the Worker's most
+ * expensive step on the free plan (a 200,000-character thread killed every transform run
+ * of tensorflow/tensorflow, 2026-10-16). The discussion comes first in a body, so the head
+ * keeps the evidence; the cut is counted and reported by the transform.
+ */
+export const MAX_UNIT_CHARS = 20_000;
 
 /**
  * Port of build_passages(): every unit (the opening body, then each comment in thread
  * order) is normalized, split within the token budget, and labelled. A unit whose
- * normalized text is empty is skipped and counted. A passage never mixes units.
+ * normalized text is empty is skipped and counted; one longer than MAX_UNIT_CHARS is cut
+ * there and counted. A passage never mixes units.
  */
 export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildResult {
   const position = reviewPositions(doc.comments);
@@ -136,8 +146,12 @@ export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildR
 
   const passages: PassageDraft[] = [];
   let skipped = 0;
+  let truncated = 0;
   for (const { unit, locator } of units) {
-    const text = normalizeMarkdown(unit.body);
+    const body = unit.body ?? "";
+    const oversized = body.length > MAX_UNIT_CHARS;
+    if (oversized) truncated += 1;
+    const text = normalizeMarkdown(oversized ? body.slice(0, MAX_UNIT_CHARS) : body);
     if (!text) {
       skipped += 1;
       continue;
@@ -163,7 +177,7 @@ export function buildPassages(doc: DocumentInput, options: BuildOptions): BuildR
       });
     });
   }
-  return { passages, units: units.length, skipped };
+  return { passages, units: units.length, skipped, truncated };
 }
 
 /** A storable row; the database owns index_state and updated_at. */

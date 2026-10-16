@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { dbError } from "../queue/retry.ts";
 import type { Budget } from "../queue/budget.ts";
+import { dirtyDocuments } from "../etl/documents.ts";
+import { EMBED_JOB_KIND, pendingPassages } from "../etl/embed.ts";
 import { BACKFILL_DELAY_SECONDS, fetchKind, rescanKind } from "../etl/extract.ts";
+import { TRANSFORM_JOB_KIND, TRANSFORM_VERSION } from "../etl/transform.ts";
 import { ensureQueuedJob, type JobQueue } from "../queue/jobs.ts";
 import { storageState } from "./maintenance.ts";
 
@@ -17,6 +20,7 @@ export const SYNC_BATCH_LIMIT = 50;
 export type DueStream = { repository_id: number; stream: string };
 export type SyncOptions = { intervalSeconds?: number; limit?: number; repositoryId?: number; budget?: Budget };
 export type SyncSchedule = { due: number; queued: (DueStream & { job_id: number })[]; deferred?: boolean };
+export type CatchUpSchedule = { checked: number; transforms: number; embeds: number; deferred?: boolean };
 
 /** True when less than QUEUE_BUDGET_RESERVE_PCT of the day's queue operations remain. */
 export async function queueBudgetLow(budget: Budget | undefined): Promise<boolean> {
@@ -52,6 +56,28 @@ export async function scheduleSyncs(db: SupabaseClient, queue: JobQueue, options
     if (job) queued.push({ ...stream, job_id: job.id });
   }
   return { due: due.length, queued };
+}
+
+/**
+ * Cron safety net for the job chain. A finished run hands over to the next kind only for
+ * what it saw: data that lands between its last check and its finish, or a run the platform
+ * killed, can leave threads waiting for a transform or passages waiting for a vector with no
+ * job to pick them up. Every tick, each live repository with such work and no active job of
+ * that kind gets one.
+ */
+export async function scheduleCatchUps(db: SupabaseClient, queue: JobQueue, options: { budget?: Budget; repositoryId?: number } = {}): Promise<CatchUpSchedule> {
+  if (await queueBudgetLow(options.budget)) return { checked: 0, transforms: 0, embeds: 0, deferred: true };
+  let query = db.from("repositories").select("id").in("status", ["registered", "searchable_partial", "searchable"]);
+  if (options.repositoryId !== undefined) query = query.eq("id", options.repositoryId);
+  const { data, error } = await query;
+  if (error) throw dbError("select repositories", error);
+  const schedule: CatchUpSchedule = { checked: 0, transforms: 0, embeds: 0 };
+  for (const { id } of (data ?? []) as { id: number }[]) {
+    schedule.checked += 1;
+    if ((await dirtyDocuments(db, id, TRANSFORM_VERSION, 1)).length > 0 && (await ensureQueuedJob(db, queue, id, TRANSFORM_JOB_KIND))) schedule.transforms += 1;
+    if ((await pendingPassages(db, id, 1)).length > 0 && (await ensureQueuedJob(db, queue, id, EMBED_JOB_KIND))) schedule.embeds += 1;
+  }
+  return schedule;
 }
 
 /** Completed streams whose last rescan (or backfill) is older than the interval. */

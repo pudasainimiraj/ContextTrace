@@ -16,11 +16,21 @@ export const TRANSFORM_VERSION = "1";
  */
 export const DOCUMENTS_PER_RUN = 10;
 
+/**
+ * Threads for a run at the given attempt: the full run first, then half as many on every
+ * retry, down to one. A run the platform killed for CPU comes back smaller, so one giant
+ * thread cannot block a repository's whole transform chain.
+ */
+export function documentsPerRun(attempt: number): number {
+  return Math.max(1, Math.floor(DOCUMENTS_PER_RUN / 2 ** Math.max(0, attempt - 1)));
+}
+
 export type TransformResult = {
   done: boolean;
   documents: number;
   units: number;
   skippedUnits: number;
+  truncatedUnits: number;
   passages: number;
   inserted: number;
   updated: number;
@@ -56,7 +66,7 @@ export async function transformRepository(
   };
 
   const numbers = await dirtyDocuments(db, repositoryId, version, limit);
-  const totals = { documents: 0, units: 0, skippedUnits: 0, passages: 0, inserted: 0, updated: 0, unchanged: 0, removed: 0, syncBytes: 0 };
+  const totals = { documents: 0, units: 0, skippedUnits: 0, truncatedUnits: 0, passages: 0, inserted: 0, updated: 0, unchanged: 0, removed: 0, syncBytes: 0 };
   if (numbers.length === 0) return { done: true, ...totals };
 
   const byNumber = new Map<number, SourceRecord[]>();
@@ -73,6 +83,7 @@ export async function transformRepository(
     const built = buildPassages(doc, build);
     totals.units += built.units;
     totals.skippedUnits += built.skipped;
+    totals.truncatedUnits += built.truncated;
     documents.push({
       document_id: doc.document_id,
       repository_id: repositoryId,

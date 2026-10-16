@@ -11,7 +11,7 @@ Architecture decision records, one section each, in the order they were taken. D
 ## ADR-0002 Cloudflare Workers Free with Queues (10-14, revised from Workers Paid)
 
 **Context.** Queues required Workers Paid until 4 February 2026; since then the free plan includes 10,000 queue operations a day with 24-hour retention. The free plan documents 10 ms of CPU per invocation.
-**Decision.** Stay on Workers Free. One job per consumer invocation (`max_batch_size` 1). Measured on the deployed Worker: transform runs of 44 to 749 ms CPU and 41 of 41 invocations successful, so the documented limit is not enforced as a hard kill on this workload; the knobs if it ever is are `DOCUMENTS_PER_RUN` and `EMBEDDING_BATCH_SIZE`.
+**Decision.** Stay on Workers Free. One job per consumer invocation (`max_batch_size` 1). Measured on the deployed Worker: transform runs of 44 to 749 ms CPU and 41 of 41 invocations successful on the small repositories, so the documented limit is not a hard kill at that scale. Revised 10-15: on tensorflow/tensorflow the limit showed as a tolerance; runs of 1.4 to 2 s CPU were terminated with `exceededCpu`, and once the tolerance was spent even 116 ms runs were cut. The splitter now tokenizes each part once (4 to 6 times less CPU) and `DOCUMENTS_PER_RUN` is 10; `EMBEDDING_BATCH_SIZE` is the next knob.
 **Consequences.** No fixed charge. Queue operations become the tightest allowance, which drove ADR-0008's economy rules.
 
 ## ADR-0003 bge-small-en-v1.5 over the Workers AI REST API with cls pooling (10-13)

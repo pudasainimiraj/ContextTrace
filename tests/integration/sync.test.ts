@@ -11,9 +11,9 @@ import { createJob, enqueueJob, getJob, type JobQueue } from "../../worker/src/q
 import { createDb, getRepository, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { search } from "../../worker/src/api/search.ts";
 import { listSources, type SourceDraft, upsertSources } from "../../worker/src/etl/sources.ts";
-import { scheduleSyncs } from "../../worker/src/cron/sync.ts";
+import { scheduleCatchUps, scheduleSyncs } from "../../worker/src/cron/sync.ts";
 import { transformRepository } from "../../worker/src/etl/transform.ts";
-import { fakeGitHubPages, fakeMessage, repoFixture } from "./helpers.ts";
+import { fakeGitHubPages, fakeMessage, insertPassages, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project with GitHub stubbed; see jobs.test.ts for the id
 // scheme. Three repositories: one searchable with a stream due for sync, one still
@@ -21,6 +21,8 @@ import { fakeGitHubPages, fakeMessage, repoFixture } from "./helpers.ts";
 const REPO = Date.now() * 100 + 22;
 const REPO_NEW = REPO + 1;
 const REPO_DOWN = REPO + 2;
+/** Its own tens digit: a registered repository with work waiting and no jobs, for the catch-up sweep. */
+const REPO_CATCHUP = Date.now() * 100 + 26;
 const db = createDb(env);
 const API = "https://api.github.com/repos/alice/sync";
 const WEB = "https://github.com/alice/sync";
@@ -70,6 +72,7 @@ beforeAll(async () => {
   await upsertRepository(db, repoFixture({ id: REPO, full_name: "alice/sync" }));
   await upsertRepository(db, repoFixture({ id: REPO_NEW, full_name: "alice/sync-new" }));
   await upsertRepository(db, repoFixture({ id: REPO_DOWN, full_name: "alice/sync-down" }));
+  await upsertRepository(db, repoFixture({ id: REPO_CATCHUP, full_name: "alice/sync-catchup" }));
   await db.from("repositories").update({ status: "searchable" }).eq("id", REPO);
   await db.from("repositories").update({ status: "inaccessible" }).eq("id", REPO_DOWN);
   for (const id of [REPO, REPO_NEW, REPO_DOWN]) await seedCheckpoints(id);
@@ -86,7 +89,7 @@ beforeAll(async () => {
   await saveCheckpoint(db, { repository_id: REPO, stream: "issues", last_synced_at: minutesAgo(20) });
 });
 afterAll(async () => {
-  await db.from("repositories").delete().in("id", [REPO, REPO_NEW, REPO_DOWN]);
+  await db.from("repositories").delete().in("id", [REPO, REPO_NEW, REPO_DOWN, REPO_CATCHUP]);
 });
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("scheduleSyncs", () => {
@@ -110,6 +113,24 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("scheduleSyncs", () => {
     expect(await scheduleSyncs(db, queue, { intervalSeconds: INTERVAL, repositoryId: REPO_NEW })).toEqual({ due: 0, queued: [] });
     expect(await scheduleSyncs(db, queue, { intervalSeconds: INTERVAL, repositoryId: REPO_DOWN })).toEqual({ due: 0, queued: [] });
     expect(queue.send).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(!env.SUPABASE_SECRET_KEY)("scheduleCatchUps", () => {
+  it("re-arms the chain for work that has no active job, once per kind", async () => {
+    const queue = fakeQueue();
+    // Nothing waiting: nothing queued.
+    expect(await scheduleCatchUps(db, queue, { repositoryId: REPO_CATCHUP })).toEqual({ checked: 1, transforms: 0, embeds: 0 });
+
+    // A thread whose document is out of date waits for a transform; a passage without a vector waits for an embed.
+    await insertPassages(db, REPO_CATCHUP, [{ text: "A passage that still needs its vector." }]);
+    expect(await scheduleCatchUps(db, queue, { repositoryId: REPO_CATCHUP })).toEqual({ checked: 1, transforms: 1, embeds: 1 });
+    expect(queue.send.mock.calls.map(([m]) => (m as JobMessage).kind).sort()).toEqual(["embed_passages", "transform_passages"]);
+
+    // The queued jobs count as active: the next tick queues nothing more.
+    expect(await scheduleCatchUps(db, queue, { repositoryId: REPO_CATCHUP })).toEqual({ checked: 1, transforms: 0, embeds: 0 });
+    // An inaccessible repository is never checked.
+    expect(await scheduleCatchUps(db, queue, { repositoryId: REPO_DOWN })).toEqual({ checked: 0, transforms: 0, embeds: 0 });
   });
 });
 

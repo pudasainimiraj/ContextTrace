@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { JobRecord as Job } from "../../shared/api.ts";
-import { createJob as insertJob } from "../../worker/src/queue/jobs.ts";
+import { createJob as insertJob, ensureQueuedJob, type JobQueue } from "../../worker/src/queue/jobs.ts";
 import { createDb, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { repoFixture } from "./helpers.ts";
 
@@ -31,6 +31,28 @@ afterAll(async () => {
 });
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("jobs", () => {
+  it("ensures one active job per kind: a queued, running or parked job blocks another", async () => {
+    const queue = { send: vi.fn<JobQueue["send"]>(async () => {}) };
+    const first = await ensureQueuedJob(db, queue, REPO_ID, "transform_passages");
+    expect(first).toMatchObject({ kind: "transform_passages", state: "queued" });
+    expect(await ensureQueuedJob(db, queue, REPO_ID, "transform_passages")).toBeNull();
+
+    await updateJob(first!.id, { state: "running" });
+    expect(await ensureQueuedJob(db, queue, REPO_ID, "transform_passages")).toBeNull();
+
+    await updateJob(first!.id, { state: "retry_pending", error_code: "rate_limited", error_message: "later", next_attempt_at: new Date(Date.now() + 60_000).toISOString() });
+    expect(await ensureQueuedJob(db, queue, REPO_ID, "transform_passages")).toBeNull();
+
+    await updateJob(first!.id, { state: "running" });
+    await updateJob(first!.id, { state: "succeeded" });
+    const second = await ensureQueuedJob(db, queue, REPO_ID, "transform_passages");
+    expect(second).toMatchObject({ state: "queued" });
+    expect(second!.id).not.toBe(first!.id);
+    // Another kind is never blocked by this one.
+    expect(await ensureQueuedJob(db, queue, REPO_ID, "embed_passages")).toMatchObject({ kind: "embed_passages", state: "queued" });
+    expect(queue.send).toHaveBeenCalledTimes(3);
+  });
+
   it("moves a job through queued, running and succeeded and logs each transition", async () => {
     const job = await createJob("fetch_issues");
     expect(job).toMatchObject({ state: "queued", attempt: 0, started_at: null, finished_at: null });

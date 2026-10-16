@@ -1,11 +1,11 @@
 import { env, exports } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { CoverageReport } from "../../shared/api.ts";
+import type { BudgetState, CoverageReport } from "../../shared/api.ts";
 import { saveCheckpoint } from "../../worker/src/etl/checkpoints.ts";
-import { getCoverage, streamCoverage } from "../../worker/src/api/coverage.ts";
+import { getCoverage, pausedUntil, streamCoverage } from "../../worker/src/api/coverage.ts";
 import { EMBED_JOB_KIND, embedPassages } from "../../worker/src/etl/embed.ts";
 import { FakeEmbeddingClient } from "../../worker/src/etl/embeddings.ts";
-import { createJob } from "../../worker/src/queue/jobs.ts";
+import { claimJob, createJob, finishJob } from "../../worker/src/queue/jobs.ts";
 import { createDb, getRepository, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { upsertSources } from "../../worker/src/etl/sources.ts";
 import { insertPassages, repoFixture } from "./helpers.ts";
@@ -108,5 +108,41 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("repository coverage", () => {
     });
     expect(report.streams.map((s) => s.phase)).toEqual(["complete", "complete", "complete"]);
     expect((await exports.default.fetch(`http://localhost/api/repositories/${REPO + 1}/coverage`)).status).toBe(404);
+  });
+});
+
+describe("pausedUntil", () => {
+  const budget = (over: Partial<BudgetState>): BudgetState => ({ resource: "x", period: "day", used: 0, limit: 1, remaining_pct: 100, paused: false, resets_at: null, ...over });
+  it("is the latest reset among exhausted budgets, or null", () => {
+    expect(pausedUntil([budget({})])).toBeNull();
+    expect(pausedUntil([budget({ paused: true, resets_at: "2026-01-02T00:00:00Z" }), budget({ paused: true, resets_at: "2026-01-03T00:00:00Z" }), budget({ paused: true, resets_at: null })])).toBe("2026-01-03T00:00:00Z");
+  });
+});
+
+describe.skipIf(!env.SUPABASE_SECRET_KEY)("active jobs and last runs", () => {
+  it("lists queued and parked jobs without their error message, and the newest succeeded run per kind", async () => {
+    const owner = "coverage-test";
+    const runAndFinish = async (kind: string, result: Record<string, unknown>) => {
+      const job = await createJob(db, REPO, kind);
+      const claim = await claimJob(db, { jobId: job.id, repoId: REPO, kind, generation: job.generation }, owner);
+      expect(claim.outcome).toBe("claimed");
+      expect(await finishJob(db, job.id, owner, { state: "succeeded", result })).not.toBeNull();
+    };
+    await runAndFinish("fetch_issues", { pages: 2, records: 30, inserted: 30, durationMs: 12 });
+    await runAndFinish("fetch_issues", { pages: 3, records: 31, inserted: 1, durationMs: 15 });
+    const parked = await createJob(db, REPO, "fetch_issue_comments");
+    await claimJob(db, { jobId: parked.id, repoId: REPO, kind: parked.kind, generation: parked.generation }, owner);
+    await finishJob(db, parked.id, owner, { state: "retry_pending", error_code: "rate_limited", error_message: "GitHub said no (internal detail)", next_attempt_at: new Date(Date.now() + 60_000).toISOString() });
+    await createJob(db, REPO, "transform_passages");
+
+    const report = await coverage();
+    const mine = report.active_jobs.filter((j) => ["fetch_issue_comments", "transform_passages"].includes(j.kind));
+    expect(mine).toEqual([
+      expect.objectContaining({ kind: "fetch_issue_comments", state: "retry_pending", error_code: "rate_limited", attempt: 1, next_attempt_at: expect.any(String) }),
+      expect.objectContaining({ kind: "transform_passages", state: "queued", error_code: null, attempt: 0, started_at: null }),
+    ]);
+    expect(JSON.stringify(report)).not.toContain("internal detail");
+    expect(report.last_runs.find((r) => r.kind === "fetch_issues")).toEqual({ kind: "fetch_issues", finished_at: expect.any(String), pages: 3, records: 31, inserted: 1, duration_ms: 15 });
+    expect(report.paused_until).toBeNull();
   });
 });

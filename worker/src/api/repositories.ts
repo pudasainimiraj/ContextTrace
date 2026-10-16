@@ -95,3 +95,17 @@ export async function getRepository(db: SupabaseClient, id: number): Promise<Rep
   if (error) throw dbError("select repositories", error);
   return data as RepositoryRecord | null;
 }
+
+/**
+ * The repository registered under this owner/name, compared without case as GitHub does. The
+ * LIKE wildcards are escaped, since `_` is allowed in a repository name. full_name is not unique:
+ * a renamed repository's old name can belong to another row, so a row that is not removed wins,
+ * then the most recently updated one.
+ */
+export async function getRepositoryByName(db: SupabaseClient, fullName: string): Promise<RepositoryRecord | null> {
+  const pattern = fullName.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data, error } = await db.from("repositories").select("*").ilike("full_name", pattern).order("updated_at", { ascending: false }).limit(10);
+  if (error) throw dbError("select repositories", error);
+  const rows = (data ?? []) as RepositoryRecord[];
+  return rows.find((r) => r.status !== "removed") ?? rows[0] ?? null;
+}

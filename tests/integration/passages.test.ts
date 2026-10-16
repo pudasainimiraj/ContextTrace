@@ -7,6 +7,7 @@ import {
   contentHash,
   documentFromSources,
   documentId,
+  MAX_UNIT_CHARS,
   type PassageDraft,
   reviewPositions,
   unitLocator,
@@ -152,10 +153,23 @@ describe("buildPassages on the Python fixtures", () => {
   });
 
   it("empty comments produce no passages", () => {
-    const { passages, skipped } = build("empty_comment", 512);
+    const { passages, skipped, truncated } = build("empty_comment", 512);
     expect(skipped).toBe(3);
+    expect(truncated).toBe(0);
     expect(passages.map((p) => p.source_type)).toEqual(["issue"]);
     expect(passages.every((p) => p.text.trim())).toBe(true);
+  });
+
+  it("indexes only the first MAX_UNIT_CHARS characters of an oversized unit and counts the cut", () => {
+    const doc = fixtureDocument(loadFixture("short_comment"));
+    doc.opening.body = "word ".repeat(10_000); // 50,000 characters of plain words
+    const { passages, truncated } = buildPassages(doc, { maxTokens: 512, countTokens: words, tokenizer: "words" });
+    expect(truncated).toBe(1);
+    const opening = passages.filter((p) => p.source_type === "issue");
+    const indexed = opening.reduce((n, p) => n + p.text.length, 0);
+    expect(indexed).toBeLessThanOrEqual(MAX_UNIT_CHARS);
+    expect(indexed).toBeGreaterThan(MAX_UNIT_CHARS - 200);
+    expect(passages.filter((p) => p.source_type !== "issue").length).toBeGreaterThan(0); // the comments are untouched
   });
 
   it("code name is preserved in every form", () => {

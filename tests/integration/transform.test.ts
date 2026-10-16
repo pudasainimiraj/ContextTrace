@@ -9,7 +9,7 @@ import { contentHash } from "../../worker/src/etl/passages.ts";
 import { createDb, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { type SourceDraft, upsertSources } from "../../worker/src/etl/sources.ts";
 import { countModelTokens, TOKENIZER_NAME } from "../../worker/src/etl/tokenizer.ts";
-import { TRANSFORM_JOB_KIND, transformRepository } from "../../worker/src/etl/transform.ts";
+import { DOCUMENTS_PER_RUN, documentsPerRun, TRANSFORM_JOB_KIND, transformRepository } from "../../worker/src/etl/transform.ts";
 import { fakeGitHubPages, fakeMessage, jsonResponse, repoFixture } from "./helpers.ts";
 
 // Runs against the real Supabase project; see jobs.test.ts for the id scheme.
@@ -71,6 +71,17 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await db.from("repositories").delete().eq("id", REPO_ID);
+});
+
+describe("documentsPerRun", () => {
+  it("halves the run on every retry and never goes below one thread", () => {
+    expect(documentsPerRun(1)).toBe(DOCUMENTS_PER_RUN);
+    expect(documentsPerRun(2)).toBe(Math.floor(DOCUMENTS_PER_RUN / 2));
+    expect(documentsPerRun(3)).toBe(Math.floor(DOCUMENTS_PER_RUN / 4));
+    expect(documentsPerRun(5)).toBe(1);
+    expect(documentsPerRun(50)).toBe(1);
+    expect(documentsPerRun(0)).toBe(DOCUMENTS_PER_RUN);
+  });
 });
 
 describe.skipIf(!env.SUPABASE_SECRET_KEY)("transformRepository", () => {

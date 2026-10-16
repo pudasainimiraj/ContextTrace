@@ -1,13 +1,13 @@
-import type { ApiError, ServiceStatus, SourceType } from "../../shared/api.ts";
+import type { ApiError, RepositoryListResponse, ServiceStatus, SourceType } from "../../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "./api/admin.ts";
-import { admissionState, findByFullName } from "./api/admission.ts";
+import { admissionState, findByFullName, MAX_REPOSITORIES } from "./api/admission.ts";
 import { Budget, budgetExhausted as budgetExhaustedError, GLOBAL_SCOPE, retryAfterHeader } from "./queue/budget.ts";
 import { consumeJobMessage } from "./queue/consumer.ts";
-import { getCoverage } from "./api/coverage.ts";
+import { getCoverage, listRepositorySummaries, pausedUntil } from "./api/coverage.ts";
 import { lookupPublicRepository, type RepoLookup } from "./api/github-api.ts";
 import { parseRepositoryInput } from "./api/github-url.ts";
-import { createJob, enqueueJob, type JobMessage, type JobQueue, meteredQueue } from "./queue/jobs.ts";
+import { createJob, enqueueJob, hasFetchJobs, type JobMessage, type JobQueue, meteredQueue } from "./queue/jobs.ts";
 import { maintain, removeRepository, storageState } from "./cron/maintenance.ts";
 import { listPassages } from "./etl/documents.ts";
 import { embeddingStats } from "./etl/embed.ts";
@@ -16,9 +16,9 @@ import { startExtraction } from "./queue/pipeline.ts";
 import { reconcileJobs } from "./cron/reconcile.ts";
 import { clientKey, rateLimitResponse } from "./api/ratelimit.ts";
 import { search } from "./api/search.ts";
-import { scheduleRescans, scheduleSyncs } from "./cron/sync.ts";
+import { QUEUE_BUDGET_RESERVE_PCT, scheduleCatchUps, scheduleRescans, scheduleSyncs } from "./cron/sync.ts";
 import { listSources } from "./etl/sources.ts";
-import { createDb, type EgressMeter, getRepository, reinstateRepository, upsertRepository } from "./api/repositories.ts";
+import { createDb, type EgressMeter, getRepository, getRepositoryByName, reinstateRepository, upsertRepository } from "./api/repositories.ts";
 import { TRANSFORM_VERSION } from "./etl/transform.ts";
 import { verifyTurnstile } from "./api/turnstile.ts";
 import { validateJob, validateRegistration, validateSearch } from "./api/validate.ts";
@@ -59,8 +59,9 @@ export default {
       const reconciled = await reconcileJobs(app.db, app.queue);
       const syncs = await scheduleSyncs(app.db, app.queue, { budget: app.budget });
       const rescans = await scheduleRescans(app.db, app.queue, { budget: app.budget });
+      const catchUps = await scheduleCatchUps(app.db, app.queue, { budget: app.budget });
       const maintenance = await maintain(app.db, app.budget);
-      console.log("cron", { reconciled, syncs, rescans, maintenance });
+      console.log("cron", { reconciled, syncs, rescans, catchUps, maintenance });
     } finally {
       settleEgress(app, ctx);
     }
@@ -115,6 +116,10 @@ async function route(request: Request, app: App): Promise<Response> {
   }
 
   if (method === "GET" && pathname === "/api/status") return getServiceStatus(app);
+  if (method === "GET" && pathname === "/api/repositories") return listRepositories(app);
+
+  const byName = /^\/api\/repositories\/by-name\/([^/]+)\/([^/]+)$/.exec(pathname);
+  if (method === "GET" && byName) return getRepositoryByFullName(app, byName[1], byName[2]);
 
   const byId = /^\/api\/repositories\/(\d+)$/.exec(pathname);
   if (method === "GET" && byId) return getRepositoryById(app, Number(byId[1]));
@@ -138,9 +143,20 @@ async function route(request: Request, app: App): Promise<Response> {
 async function getServiceStatus(app: App): Promise<Response> {
   const [budgets, admissions, storage] = await Promise.all([app.budget.summary(), admissionState(app.db, app.budget), storageState(app.budget)]);
   const exhausted = budgets.filter((b) => b.paused);
+  // Work that waits without any budget being exhausted: the schedulers hold back below the queue
+  // reserve, and storage at the warning level holds backfills and rescans (syncs too at critical).
+  const deferred: string[] = [];
+  const queueOps = budgets.find((b) => b.resource === "queue_ops");
+  if (queueOps && !queueOps.paused && queueOps.remaining_pct < QUEUE_BUDGET_RESERVE_PCT) {
+    deferred.push(`queue operations: ${queueOps.used} of ${queueOps.limit} used; syncs, backfills and rescans wait below ${QUEUE_BUDGET_RESERVE_PCT}% remaining${queueOps.resets_at ? `, resets at ${queueOps.resets_at}` : ""}`);
+  }
+  if (storage.level !== "ok") {
+    deferred.push(`storage: ${Math.round((storage.used / storage.limit) * 100)}% of its budget used; ${storage.level === "critical" ? "syncs, backfills and rescans" : "backfills and rescans"} wait until space is freed`);
+  }
   const body: ServiceStatus = {
     paused: exhausted.length > 0,
     reasons: exhausted.map((b) => `${b.resource}: ${b.used} of ${b.limit} used${b.resets_at ? `, resets at ${b.resets_at}` : ""}`),
+    deferred,
     budgets,
     admissions,
     protections: { turnstile: Boolean(app.env.TURNSTILE_SECRET_KEY), rate_limits: Boolean(app.env.SEARCH_LIMITER), admin: Boolean(app.env.ADMIN_TOKEN) },
@@ -205,6 +221,9 @@ async function submitRepository(request: Request, app: App): Promise<Response> {
   if (created) await startExtraction(db, app.queue, row.id);
   if (row.status === "inaccessible" || row.status === "removed") {
     row = await reinstateRepository(db, row.id, TRANSFORM_VERSION);
+    await startExtraction(db, app.queue, row.id);
+  } else if (!created && !(await hasFetchJobs(db, row.id))) {
+    // Registered before the job system existed, or its history was purged: a resubmission starts the chain.
     await startExtraction(db, app.queue, row.id);
   }
   return created
@@ -288,10 +307,34 @@ async function searchRepository(request: Request, { db, env, budget }: App): Pro
 }
 
 /** GET /api/repositories/:id/coverage -> counts, stream progress, high-water marks and sync times */
-async function getRepositoryCoverage({ db }: App, repositoryId: number): Promise<Response> {
+async function getRepositoryCoverage({ db, budget }: App, repositoryId: number): Promise<Response> {
   const repository = await getRepository(db, repositoryId);
   if (!repository) return error(404, "not_found", "Repository is not registered");
-  return json(await getCoverage(db, repository));
+  const [report, budgets] = await Promise.all([getCoverage(db, repository), budget.summary()]);
+  return json({ ...report, paused_until: pausedUntil(budgets) });
+}
+
+/** GET /api/repositories -> every repository that is not removed, list order, and the admission capacity */
+async function listRepositories({ db }: App): Promise<Response> {
+  const repositories = await listRepositorySummaries(db);
+  // The same rows the admission check counts, so the capacity shown agrees with the door.
+  const body: RepositoryListResponse = { repositories, capacity: { used: repositories.length, max: MAX_REPOSITORIES } };
+  return json(body);
+}
+
+/** GET /api/repositories/by-name/:owner/:name -> the registered row under that name, or 404 */
+async function getRepositoryByFullName({ db }: App, rawOwner: string, rawName: string): Promise<Response> {
+  let owner: string;
+  let name: string;
+  try {
+    [owner, name] = [decodeURIComponent(rawOwner), decodeURIComponent(rawName)];
+  } catch {
+    return error(400, "invalid_input", "Expected /api/repositories/by-name/<owner>/<repository>");
+  }
+  const parsed = parseRepositoryInput(`${owner}/${name}`);
+  if (!parsed.ok) return error(400, "invalid_input", parsed.error);
+  const row = await getRepositoryByName(db, `${parsed.owner}/${parsed.name}`);
+  return row ? json(row) : error(404, "not_found", "Repository is not registered");
 }
 
 /** DELETE /api/repositories/:id (admin) -> removes everything the repository holds; the row stays as a tombstone */

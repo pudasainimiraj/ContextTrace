@@ -173,9 +173,17 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("admissions", () => {
     }
   });
 
-  it("appear in the service status", async () => {
-    const res = await worker.fetch(new Request("http://localhost/api/status"), scopedEnv, fakeExecutionContext());
-    expect(((await res.json()) as ServiceStatus).admissions).toEqual({ open: true, reason: null });
+  it("appear in the service status, with the work that waits without a pause", async () => {
+    const status = async () => (await (await worker.fetch(new Request("http://localhost/api/status"), scopedEnv, fakeExecutionContext())).json()) as ServiceStatus;
+    expect(await status()).toMatchObject({ admissions: { open: true, reason: null }, deferred: [] });
+    await budget.gauge("storage_bytes", 320_000_000);
+    try {
+      const warned = await status();
+      expect(warned.paused).toBe(false);
+      expect(warned.deferred).toEqual([expect.stringMatching(/^storage: 80% of its budget used; backfills and rescans wait/)]);
+    } finally {
+      await budget.gauge("storage_bytes", 0);
+    }
   });
 });
 

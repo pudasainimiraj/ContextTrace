@@ -87,6 +87,12 @@ export class WorkersAiEmbeddingClient implements EmbeddingClient {
     const body = (await readJson(res)) as Envelope | undefined;
     const message = body?.errors?.[0]?.message ?? `Workers AI responded ${res.status}`;
     if (res.status === 429) {
+      // The free plan's daily allocation (10,000 neurons, reset at 00:00 UTC) comes back as a
+      // 429 too. It is a budget, not a rate: the job parks until the reset without using up
+      // its attempts, like the ledger's own caps (ClickHouse, 2026-10-16).
+      if (/daily free allocation/i.test(message)) {
+        throw new JobError("budget_exhausted", `Workers AI: ${message}`, { transient: true, retryAfterSeconds: secondsUntilUtcMidnight() });
+      }
       throw new JobError("ai_rate_limited", message, { transient: true, retryAfterSeconds: retryAfterSeconds(res) });
     }
     if (res.status === 401 || res.status === 403) throw new JobError("ai_auth", message, { transient: false });
@@ -201,4 +207,11 @@ async function readJson(res: Response): Promise<unknown> {
 function retryAfterSeconds(res: Response): number {
   const header = res.headers.get("Retry-After");
   return header && /^\d+$/.test(header) ? Number(header) : 60;
+}
+
+/** Seconds until the next 00:00 UTC, when Workers AI's daily allocation resets; at least one minute. */
+export function secondsUntilUtcMidnight(now = Date.now()): number {
+  const midnight = new Date(now);
+  midnight.setUTCHours(24, 0, 0, 0);
+  return Math.max(60, Math.ceil((midnight.getTime() - now) / 1000));
 }
