@@ -40,3 +40,7 @@ coverage
 # python prototype
 __pycache__/
 .venv
+
+
+.agents/skills
+.vscode/*

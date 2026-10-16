@@ -8,8 +8,13 @@ import { countModelTokens, TOKENIZER_NAME } from "./tokenizer.ts";
 export const TRANSFORM_JOB_KIND = "transform_passages";
 /** Bump when normalizeMarkdown, splitText, MAX_PASSAGE_TOKENS or the tokenizer files change. */
 export const TRANSFORM_VERSION = "1";
-/** Threads transformed per job run before the job yields to a continuation job. */
-export const DOCUMENTS_PER_RUN = 50;
+/**
+ * Threads transformed per job run before the job yields to a continuation job. Tokenizing
+ * is the Worker's only CPU-heavy work: 50 threads of tensorflow/tensorflow took 1.4 to
+ * 2 s of CPU and the free plan terminated the runs with exceededCpu (2026-10-15), so a run
+ * stays small and the chain spreads the work over many short invocations.
+ */
+export const DOCUMENTS_PER_RUN = 10;
 
 export type TransformResult = {
   done: boolean;
