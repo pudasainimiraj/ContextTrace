@@ -1,0 +1,274 @@
+/* Tokens and globals. Colours are ContextTrace's own; the scales follow the house rules:
+   a 4 px grid, a 12 to 36 px type scale with 14 px body and 12 px meta, 4/6/8 px radii,
+   40 px controls (32 px inline, 40 px at 2xl), 0.15 to 0.25 s eased motion. */
+:root {
+  --text: #6b6375;
+  --text-h: #08060d;
+  --bg: #fff;
+  --bg-soft: #f6f5f8;
+  --border: #e5e4e7;
+  --accent: #8f2be0;
+  --accent-fg: #fff;
+  --accent-bg: rgba(143, 43, 224, 0.1);
+  --error: #b42318;
+  --green: #0f7a3c;
+  --green-bg: rgba(15, 122, 60, 0.1);
+  --amber: #9a5b00;
+  --amber-bg: rgba(154, 91, 0, 0.12);
+  --red: #b42318;
+  --red-bg: rgba(180, 35, 24, 0.1);
+  --muted: #7a7580;
+  --muted-bg: rgba(122, 117, 128, 0.12);
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+  --text-4xl: 36px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.1);
+
+  --control-md: 40px;
+  --control-sm: 32px;
+  --header-h: 48px;
+  --content-max: 760px;
+  --empty-max: 384px;
+
+  --dur-fast: 0.15s;
+  --dur: 0.25s;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  font: var(--text-sm) / 1.5 var(--sans);
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #9ca3af;
+    --text-h: #f3f4f6;
+    --bg: #16171d;
+    --bg-soft: #1d1e26;
+    --border: #2e303a;
+    --accent: #c084fc;
+    --accent-fg: #16171d;
+    --accent-bg: rgba(192, 132, 252, 0.15);
+    --error: #f97066;
+    --green: #4ade80;
+    --green-bg: rgba(74, 222, 128, 0.14);
+    --amber: #fbbf24;
+    --amber-bg: rgba(251, 191, 36, 0.14);
+    --red: #f97066;
+    --red-bg: rgba(249, 112, 102, 0.14);
+    --muted: #8b8f9a;
+    --muted-bg: rgba(139, 143, 154, 0.16);
+    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
+    --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* The compact set is the default; 2xl steps up. */
+@media (min-width: 1536px) {
+  :root {
+    --control-sm: 40px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+h1 {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text-h);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-h);
+  margin: 0;
+}
+
+h3 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-h);
+  margin: 0;
+}
+
+@media (min-width: 1536px) {
+  h1 {
+    font-size: var(--text-3xl);
+  }
+  h2 {
+    font-size: var(--text-lg);
+  }
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+ul,
+ol {
+  margin: var(--space-2) 0 0;
+  padding-left: 20px;
+}
+
+li + li {
+  margin-top: var(--space-1);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+h1:focus,
+h3:focus {
+  outline: none;
+}
+
+/* Text roles */
+.meta {
+  font-size: var(--text-xs);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.description {
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin-top: var(--space-1);
+}
+
+.lede {
+  font-size: var(--text-md);
+  margin-top: var(--space-2);
+}
+
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip {
+  position: absolute;
+  left: -999px;
+  top: 8px;
+  background: var(--bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.skip:focus {
+  left: 16px;
+  z-index: 10;
+}
+
+/* Motion: state changes fade in with a 4 px rise; reduced motion keeps the end states. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.fade-in {
+  animation: fade-in var(--dur) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
