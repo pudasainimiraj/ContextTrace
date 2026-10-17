@@ -1,6 +1,6 @@
 // A history-based router of four routes. No dependency: the application is small and the CSP is strict.
 
-import { useEffect, useState, type AnchorHTMLAttributes, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 
 export type Route =
   | { page: "home" }
@@ -60,22 +60,4 @@ export function useLocation(): Location {
     };
   }, []);
   return location;
-}
-
-type LinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & { to: string };
-
-/** An in-app link: a plain left click navigates without a reload; modified clicks and new tabs work as usual. */
-export function Link({ to, onClick, children, ...rest }: LinkProps) {
-  function handle(event: MouseEvent<HTMLAnchorElement>) {
-    onClick?.(event);
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if (rest.target && rest.target !== "_self") return;
-    event.preventDefault();
-    navigate(to);
-  }
-  return (
-    <a href={to} onClick={handle} {...rest}>
-      {children}
-    </a>
-  );
 }

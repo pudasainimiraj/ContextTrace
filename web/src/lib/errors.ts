@@ -40,9 +40,9 @@ export function describeApiError(status: number, body: ApiError | null, retryAft
     case "not_found":
       return view(context === "search" ? "This repository is not indexed. Add it from the home page." : "Not found.", "home");
     case "upstream_error":
-      return view("GitHub had a problem answering. It has been logged. Try again in a minute.", "retry");
+      return view("GitHub had a problem answering; it has been logged.", "retry");
   }
-  if (status >= 500) return view("The service had a problem. It has been logged. Try again in a minute.", "retry");
+  if (status >= 500) return view("The service had a problem; it has been logged.", "retry");
   return view(body?.message ?? `Request failed (${status})`);
 }
 

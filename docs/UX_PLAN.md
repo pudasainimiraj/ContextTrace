@@ -400,6 +400,18 @@ Verify: Recall@3 on the frozen set is unchanged (the SPA never changes ranking);
 
 ## 10. Copy and style rules
 
+### Design rules in force (harmonised with Salamander on 2026-10-16)
+
+The structure and behaviour follow the rules Salamander's frontend uses; the colours, fonts and the sidebar do not. The values live in `web/src/styles/base.css` as tokens.
+
+- **Grid and rhythm**: a 4 px unit; 32 px between sections, 16 px from a section title to its content, 4 px from a title to its description; 20 px card padding; 16 x 20 px list rows; 6 px between an icon or dot and its text.
+- **Type**: 12 / 14 / 16 / 18 / 20 / 24 / 30 / 36 px. Body 14, meta 12, section titles 16 / 600 (18 at 2xl), page title 24 (30 at 2xl). Tabular figures on counts. Badges 0.7 rem / 600 with 0.04 em tracking.
+- **Shape**: 1 px borders; radii 4 (small), 6 (controls), 8 (cards), round (pills, badges, segments); dashed 1 px for empty placeholders; shadows `card`, `raised`, `soft` as tokens, `soft` on card hover only.
+- **Controls**: 40 px inputs and primary buttons; 32 px inline buttons (40 at 2xl). Four button variants: primary (solid), secondary (outline, tints on hover), ghost (transparent, scales 1.05 on hover), destructive (unused). Disabled is 0.6 opacity with a not-allowed cursor. A working button shows its own spinner; never a separate one.
+- **Surface states**: every surface has loading, empty and error states with one geometry (52 px icon slot, 14 px title, 12 px hint up to 384 px, optional action), so titles do not jump; empty is dashed, error is red with a Retry; a failed fetch never renders as "no data". Skeleton rows when the list shape is known; a 32 px spinner otherwise.
+- **Motion**: 0.15 to 0.25 s eased; state changes fade in with a 4 px rise; reduced motion keeps end states (0.001 ms durations).
+- **Content**: sentence case; relative times up to a week, then "April 12th 2018"; absolute UTC in titles; one-line truncation with a title on names, two lines on result titles; icons 1 em inline and decorative; page titles "{Page} | ContextTrace".
+
 - Plain words. Never "stream", "high-water mark", "cursor", "job", "backfill", "embed", "vector" outside the operator disclosure. Say "fetching", "older history", "making searchable", "passage".
 - One noun per thing: repository, discussion, thread (an issue or a pull request), passage, result.
 - Relative times in text ("14 min ago"), absolute UTC in `title`. Thousands separators on every count.
