@@ -10,5 +10,9 @@ Milestone 8 (evaluation, user validation, public launch), in order:
 
 Open items from earlier milestones:
 
-- Turnstile stays off until `TURNSTILE_SECRET_KEY` and `VITE_TURNSTILE_SITE_KEY` are set (hostname `contexttrace.contexttrace.workers.dev`).
+- Turnstile stays off until `TURNSTILE_SECRET_KEY` and `VITE_TURNSTILE_SITE_KEY` are set (hostnames `contexttrace.contexttrace.workers.dev` and `pudasainimiraj.github.io`).
+- GitHub Pages serves a deep link (`/r/owner/name`, `/status`, `/about`) from `404.html`, a copy of `index.html`, with status 404. The CT-45 permalink check applies to the Worker URL.
 - `docs/PROJECT_PLAN.pdf` is to be added by the project owner.
+- **Calibrate the Workers AI ledger.** On 2026-10-16 Workers AI refused embeddings with "you have used up your daily free allocation of 10,000 neurons" while `usage_budgets` showed 1,683 of 8,000 neurons for the day. Either the neurons-per-token rate (1,841 per million) or the reset window differs from Cloudflare's accounting; compare the dashboard's neuron graph with `embedding_usage` for one day and correct `NEURONS_PER_MILLION_TOKENS` or the window. Until then the provider's own 429 parks embed jobs until 00:00 UTC.
+- A repository with issues disabled (torvalds/linux, 2026-10-15) gets a 404 from the issue-comments stream and is marked `inaccessible`; the lookup should read `has_issues` and skip the stream instead.
+- Resubmitting a repository that has no jobs (ClickHouse/ClickHouse, registered 2026-10-12 before the job system, resubmitted 11 times) does not start extraction; `submitRepository` should start the chain when no fetch job exists.

@@ -26,7 +26,7 @@ flowchart LR
 
 | Directory | Role |
 | --- | --- |
-| `web/src` | React + Vite single-page app: registration form (with Turnstile when configured), live coverage panel, search panel with evidence cards, service status banner. Served as Worker static assets with a strict CSP (`web/public/_headers`). |
+| `web/src` | React + Vite single-page app: registration form (with Turnstile when configured), live coverage panel, search panel with evidence cards, service status banner. Served as Worker static assets with a strict CSP (`web/public/_headers`), and published to GitHub Pages under `/ContextTrace/` by `.github/workflows/pages.yml`, where it calls the Worker across origins (`ALLOWED_ORIGINS`) with the same policy in a meta tag. |
 | `worker/src/api` | HTTP routes and everything a request needs: validation, rate limits, Turnstile, admin token, admissions, registration, search, evidence cards, coverage, status, repositories. |
 | `worker/src/queue` | The job system: `jobs` rows are the source of truth, queue messages carry only ids and a generation; claims with leases, retries with backoff, budget pauses, the consumer that runs one job per invocation, and the budget ledger. |
 | `worker/src/etl` | GitHub extraction streams (issues and pull requests, issue comments, review comments) with durable per-stream cursors; Markdown normalisation; token-bounded chunking with the model's own WordPiece tokenizer; deterministic passage ids and content hashes; embedding with pgvector storage. |

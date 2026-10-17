@@ -34,6 +34,25 @@ npx wrangler secret put TURNSTILE_SECRET_KEY    # optional; enables Turnstile on
 reports which protections are enforced and how much of each free-tier budget is used; no
 response ever carries a secret, and `tests/integration/security.test.ts` checks that.
 
+### GitHub Pages
+
+The SPA is also published at `https://pudasainimiraj.github.io/ContextTrace/` by
+`.github/workflows/pages.yml`, on every push to `main` or by hand from the Actions tab. The Worker
+stays on Cloudflare and the site calls it across origins: `ALLOWED_ORIGINS` in `wrangler.jsonc`
+names the site, and the Worker answers preflights and adds the CORS headers for that origin alone.
+
+One-time setup in the repository settings: Pages > Build and deployment > Source: "GitHub Actions".
+Optional repository variables (Settings > Secrets and variables > Actions): `VITE_API_BASE_URL`
+(overrides the Worker URL set in `vite.config.ts`) and `VITE_TURNSTILE_SITE_KEY`. When Turnstile
+is on, its widget must list `pudasainimiraj.github.io` as a hostname too.
+
+`npm run build:pages` makes the same build locally into `dist/pages`. `vite build --mode pages`
+leaves the Worker out, sets the base path
+`/ContextTrace/` and, since Pages sends no custom headers, writes the policy of `web/public/_headers`
+into a meta tag with the Worker's origin in `connect-src` (`frame-ancestors` and `X-Frame-Options`
+have no meta form). `404.html` is a copy of `index.html`: Pages has no SPA fallback, so a direct
+visit to `/r/owner/name` is served by it, with status 404.
+
 ## Repository layout
 
 | Path | What is there |
@@ -47,4 +66,4 @@ response ever carries a secret, and `tests/integration/security.test.ts` checks 
 | `pipeline/` | The Python prototype that `worker/src/etl/` ports. It is not deployed. |
 | `NEXT.md`, `LATER.md` | What is in progress and what is deliberately deferred. |
 
-The root holds `package.json` (scripts `dev`, `build`, `test`, `typecheck`, `lint`, `eval`, `deploy`, `db:push`), `wrangler.jsonc`, `vite.config.ts`, `vitest.config.ts`, the `tsconfig*.json` set and `.env.example`. Node 22 is required (`.nvmrc`).
+The root holds `package.json` (scripts `dev`, `build`, `build:pages`, `test`, `typecheck`, `lint`, `eval`, `deploy`, `db:push`), `wrangler.jsonc`, `vite.config.ts`, `vitest.config.ts`, the `tsconfig*.json` set and `.env.example`. Node 22 is required (`.nvmrc`).

@@ -14,7 +14,9 @@
 	},
 	"vars": {
 		// Public project URL. The secret key is a secret, not a var (see .env.example).
-		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co"
+		"SUPABASE_URL": "https://yqnlcfpvtnnvrhdswoub.supabase.co",
+		// Browser origins that may call the API across origins (comma-separated): the GitHub Pages site.
+		"ALLOWED_ORIGINS": "https://pudasainimiraj.github.io"
 	},
 	"triggers": {
 		// Reconciliation sweep (expired leases, lost retries) and incremental sync scheduling.

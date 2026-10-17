@@ -1,5 +1,5 @@
 import type { AnchorHTMLAttributes, MouseEvent } from "react";
-import { navigate } from "../lib/router.ts";
+import { href, navigate } from "../lib/router.ts";
 
 type LinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & { to: string };
 
@@ -13,7 +13,7 @@ export function Link({ to, onClick, children, ...rest }: LinkProps) {
     navigate(to);
   }
   return (
-    <a href={to} onClick={handle} {...rest}>
+    <a href={href(to)} onClick={handle} {...rest}>
       {children}
     </a>
   );

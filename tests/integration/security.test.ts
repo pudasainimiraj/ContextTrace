@@ -47,7 +47,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("configuration", () => {
   it("keeps every secret out of wrangler.jsonc and lists every one in .env.example", () => {
     const vars = /"vars":\s*\{([^}]*)\}/.exec(wranglerConfig)?.[1] ?? "";
-    expect([...vars.matchAll(/"([A-Z_]+)":/g)].map((m) => m[1])).toEqual(["SUPABASE_URL"]);
+    expect([...vars.matchAll(/"([A-Z_]+)":/g)].map((m) => m[1])).toEqual(["SUPABASE_URL", "ALLOWED_ORIGINS"]);
     for (const name of SECRET_ENV_NAMES) {
       if (name === "SUPABASE_PASSWORD") continue; // only the migration tool uses it, from the shell
       expect(envExample, name).toMatch(new RegExp(`^${name}=$`, "m"));
@@ -69,6 +69,30 @@ describe("configuration", () => {
     expect(headersFile).toMatch(/X-Content-Type-Options: nosniff/);
     expect(headersFile).toMatch(/X-Frame-Options: DENY/);
     expect(headersFile).toMatch(/Referrer-Policy: no-referrer/);
+  });
+});
+
+describe("cross-origin access", () => {
+  const PAGES = "https://pudasainimiraj.github.io";
+
+  it("answers a preflight from the Pages site and exposes the headers the client reads", async () => {
+    const preflight = await call("/api/search", { method: "OPTIONS", headers: { origin: PAGES, "access-control-request-method": "POST" } });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe(PAGES);
+    expect(preflight.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+    expect(preflight.headers.get("Access-Control-Allow-Headers")).toMatch(/content-type/i);
+    const res = await call("/api/health", { headers: { origin: PAGES } });
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(PAGES);
+    expect(res.headers.get("Access-Control-Expose-Headers")).toMatch(/Retry-After/);
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("gives any other origin, and a request without one, no cross-origin permission", async () => {
+    const cases: Record<string, string>[] = [{ origin: "https://evil.example" }, {}];
+    for (const headers of cases) {
+      expect((await call("/api/health", { headers })).headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect((await call("/api/health", { method: "OPTIONS", headers })).status).toBe(404);
+    }
   });
 });
 

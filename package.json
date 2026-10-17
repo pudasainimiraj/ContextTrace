@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "tsc -b && vite build --mode pages && cp dist/pages/index.html dist/pages/404.html",
     "lint": "oxlint",
     "typecheck": "tsc -b",
     "test": "vitest run",
@@ -13,7 +14,7 @@
     "deploy": "npm run build && wrangler deploy --config dist/contexttrace/wrangler.json",
     "cf-typegen": "wrangler types --env-file .env.example",
     "eval": "node tests/evaluation/run.ts",
-    "db:push": "supabase db push --db-url \"$SUPABASE_DB_URL\""
+    "db:push": "npx supabase db push --db-url \"${SUPABASE_DB_URL:-$(grep -m1 '^SUPABASE_DB_URL=' .env | cut -d= -f2-)}\""
   },
   "dependencies": {
     "@huggingface/tokenizers": "0.2.0",

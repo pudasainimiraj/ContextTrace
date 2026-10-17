@@ -1,0 +1,48 @@
+# Builds the SPA alone (vite build --mode pages) and publishes dist/pages to GitHub Pages.
+# The Worker is deployed separately (npm run deploy); the site calls it at VITE_API_BASE_URL.
+# One-time setup: Settings > Pages > Build and deployment > Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build:pages
+        env:
+          # Optional repository variables (Settings > Secrets and variables > Actions > Variables); both are
+          # public values. VITE_API_BASE_URL overrides the Worker URL set in vite.config.ts.
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

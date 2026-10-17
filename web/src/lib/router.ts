@@ -1,6 +1,10 @@
 // A history-based router of four routes. No dependency: the application is small and the CSP is strict.
+// Routes are matched and built without Vite's base ("/" on the Worker, "/ContextTrace/" on GitHub
+// Pages); the base is added when a URL goes to the browser and removed when one comes back.
 
 import { useEffect, useState } from "react";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export type Route =
   | { page: "home" }
@@ -35,15 +39,22 @@ export function repositoryPath(fullName: string, query?: string): string {
   return query ? `${base}?q=${encodeURIComponent(query)}` : base;
 }
 
+/** The browser URL of an application path. */
+export function href(to: string): string {
+  return BASE + to;
+}
+
 const listeners = new Set<() => void>();
 
 function current(): Location {
-  return { pathname: window.location.pathname, search: window.location.search };
+  const { pathname, search } = window.location;
+  const path = BASE && pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
+  return { pathname: path || "/", search };
 }
 
 export function navigate(to: string, options: { replace?: boolean } = {}): void {
-  if (options.replace) window.history.replaceState(null, "", to);
-  else window.history.pushState(null, "", to);
+  if (options.replace) window.history.replaceState(null, "", href(to));
+  else window.history.pushState(null, "", href(to));
   for (const listener of listeners) listener();
 }
 

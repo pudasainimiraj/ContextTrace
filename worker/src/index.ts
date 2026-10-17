@@ -5,6 +5,7 @@ import { admissionState, findByFullName, MAX_REPOSITORIES } from "./api/admissio
 import { Budget, budgetExhausted as budgetExhaustedError, GLOBAL_SCOPE, retryAfterHeader } from "./queue/budget.ts";
 import { consumeJobMessage } from "./queue/consumer.ts";
 import { getCoverage, listRepositorySummaries, pausedUntil } from "./api/coverage.ts";
+import { allowedOrigin, preflightResponse, withCors } from "./api/cors.ts";
 import { lookupPublicRepository, type RepoLookup } from "./api/github-api.ts";
 import { parseRepositoryInput } from "./api/github-url.ts";
 import { createJob, enqueueJob, hasFetchJobs, type JobMessage, type JobQueue, meteredQueue } from "./queue/jobs.ts";
@@ -40,13 +41,17 @@ function settleEgress(app: App, ctx: ExecutionContext): void {
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    // The SPA on GitHub Pages calls from another origin: its preflights are answered before any
+    // work, and every response to it carries the CORS headers, the 500 included.
+    const origin = allowedOrigin(request, env.ALLOWED_ORIGINS);
+    if (request.method === "OPTIONS" && origin !== null) return preflightResponse(origin);
     const app = createApp(env);
     try {
-      return await route(request, app);
+      return withCors(await route(request, app), origin);
     } catch (err) {
       // Nothing about the failure reaches the client; the log has it.
       console.error("unhandled request error", err);
-      return error(500, "internal_error", "Something went wrong on our side; the problem has been logged");
+      return withCors(error(500, "internal_error", "Something went wrong on our side; the problem has been logged"), origin);
     } finally {
       settleEgress(app, ctx);
     }

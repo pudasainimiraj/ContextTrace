@@ -2,12 +2,15 @@
 
 import { describeApiError, readError, type ErrorContext, type ErrorView } from "./errors.ts";
 
+// Where the API lives: empty on the Worker, which serves both; the Worker's URL on GitHub Pages.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
 export type ApiResult<T> = { ok: true; status: number; value: T } | { ok: false; status: number; error: ErrorView };
 
 export async function api<T>(path: string, context: ErrorContext, init?: RequestInit): Promise<ApiResult<T>> {
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(API_BASE + path, init);
   } catch {
     return { ok: false, status: 0, error: describeApiError(0, null, null, context) };
   }
