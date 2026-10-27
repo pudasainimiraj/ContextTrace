@@ -5,7 +5,7 @@ import { Link } from "./Link.tsx";
 export function StatusStrip() {
   const { label, tone } = stripView(useServiceStatus());
   return (
-    <Link to="/status" className={`strip tone-${tone}`}>
+    <Link to="/status" className={`strip strip-${tone}`}>
       <span className={`dot${tone === "muted" ? " hollow" : ""}`} aria-hidden="true" /> {label}
     </Link>
   );

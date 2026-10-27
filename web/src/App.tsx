@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { LiveRegionProvider } from "./components/LiveRegion.tsx";
 import { ServiceStatusProvider } from "./components/ServiceStatusProvider.tsx";
 import { StatusStrip } from "./components/StatusStrip.tsx";
+import { Icon } from "./components/Icon.tsx";
 import { Link } from "./components/Link.tsx";
 import { matchRoute, useLocation } from "./lib/router.ts";
 import AboutPage from "./pages/About.tsx";
@@ -58,17 +59,27 @@ function App() {
         </a>
         <header className="site">
           <Link to="/" className="brand">
+            <Icon name="trace" />
             ContextTrace
           </Link>
           <nav aria-label="Site">
-            <Link to="/about">About</Link>
+            <Link to="/about" className="quiet">
+              About
+            </Link>
             <StatusStrip />
           </nav>
         </header>
         <main id="main">{page}</main>
         <footer className="site">
           <p className="meta">
-            Public discussions only; the code is never read. <Link to="/about">How it works</Link> · <Link to="/status">Status</Link>
+            Public discussions only; the code is never read.{" "}
+            <Link to="/about" className="quiet">
+              How it works
+            </Link>{" "}
+            ·{" "}
+            <Link to="/status" className="quiet">
+              Status
+            </Link>
           </p>
         </footer>
       </ServiceStatusProvider>

@@ -210,15 +210,39 @@ input.input-sm {
   background: var(--muted-bg);
 }
 
+/* The header strip is ambient: muted words, only the small dot carries the tone, a slow breath when not normal. */
 .strip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  font: 500 var(--text-xs) / 1 var(--sans);
+  padding: 4px 0;
+  font: 400 var(--text-xs) / 1 var(--sans);
+  color: var(--muted);
   text-decoration: none;
   white-space: nowrap;
+  transition: color var(--dur-fast) ease;
+}
+
+.strip:hover {
+  color: var(--text-h);
+}
+
+.strip .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.strip-green .dot {
+  color: var(--green);
+}
+
+.strip-amber .dot {
+  color: var(--amber);
+  animation: pulse 3.2s ease-in-out infinite;
+}
+
+.strip-red .dot {
+  color: var(--red);
 }
 
 /* Notices: inline sentences the reader should notice. */
@@ -411,6 +435,7 @@ details > summary {
 }
 
 .repo-row {
+  position: relative;
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--border);
   display: grid;
@@ -439,14 +464,48 @@ details > summary {
 }
 
 .repo-name {
-  font-weight: 600;
+  font: 600 var(--text-sm) / 1.4 var(--mono);
   color: var(--text-h);
   text-decoration: none;
   min-width: 0;
 }
 
-.repo-name:hover {
-  text-decoration: underline;
+.repo-name::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.repo-name:focus-visible {
+  outline: none;
+}
+
+.repo-row:has(.repo-name:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.repo-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+}
+
+.repo-go {
+  color: var(--muted);
+  transition: color var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+
+.repo-row:hover .repo-go {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+.repo-actions a {
+  position: relative;
+  z-index: 1;
 }
 
 .meta.now {
@@ -650,18 +709,25 @@ dd {
   margin-top: var(--space-2);
 }
 
+/* Evidence card: a cyan trace rule on the left, the title first, the matched passage set off in amber, quiet actions last. */
 .card {
   padding: var(--space-5);
   border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
   border-radius: var(--radius-lg);
-  background: var(--bg);
+  background: var(--bg-soft);
   display: grid;
-  gap: var(--space-1);
-  transition: box-shadow var(--dur-fast) ease;
+  gap: var(--space-2);
+  transition: box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
 .card:hover {
   box-shadow: var(--shadow-soft);
+  border-color: var(--accent);
+}
+
+.card.skeleton {
+  border-left-color: var(--border);
 }
 
 .card-head {
@@ -675,31 +741,43 @@ dd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-xs);
-  color: var(--text-h);
+  font: 500 var(--text-xs) / 1.4 var(--mono);
+  color: var(--text);
 }
 
 .card-title {
-  color: var(--accent);
+  color: var(--text-h);
+  font-size: var(--text-md);
   font-weight: 600;
+  line-height: 1.4;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
 .card-title:hover {
-  text-decoration: underline;
+  color: var(--accent);
 }
 
 .excerpt {
   color: var(--text-h);
-  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--amber);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--amber-bg);
 }
 
 .card-actions {
   display: flex;
   gap: var(--space-2);
-  margin-top: var(--space-2);
   margin-left: calc(-1 * var(--space-2));
+}
+
+.card-actions .btn-ghost {
+  color: var(--text);
+}
+
+.card-actions .btn-ghost:hover {
+  color: var(--accent);
 }
 
 .thread-more {
