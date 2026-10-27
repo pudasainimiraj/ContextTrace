@@ -382,7 +382,17 @@ details > summary {
   width: 100%;
 }
 
-/* Forms sit in the content container, never in cards. */
+/* Forms sit in the content container, never in cards. Reading surfaces stop at --reading-max, left-aligned. */
+.register-form,
+.search-form,
+.results,
+.results-head,
+.state,
+.about-index,
+.how {
+  max-width: var(--reading-max);
+}
+
 .register-form,
 .search-form {
   display: flex;

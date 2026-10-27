@@ -6,7 +6,14 @@
  * is dirty or pending (sticky). inaccessible: GitHub no longer serves the repository.
  * removed: the data was deleted (after 30 days unreachable, or by an operator); the row stays.
  */
-export type RepositoryStatus = "registered" | "searchable_partial" | "searchable" | "inaccessible" | "removed";
+/**
+ * Beta limit on a new repository's issues and pull requests, so storage holds about 15 of them.
+ * Measured 2026-10-27: ~10 KB per stored passage, ~2.8 passages per issue or pull request with
+ * its comments; 177 MB left under the 320 MB admission line, shared by 14 new repositories.
+ */
+export const MAX_ISSUES_AND_PULL_REQUESTS = 500;
+
+export type RepositoryStatus ="registered" | "searchable_partial" | "searchable" | "inaccessible" | "removed";
 
 export type RepositoryRecord = {
   id: number;

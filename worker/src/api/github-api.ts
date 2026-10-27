@@ -35,10 +35,50 @@ export type LookupOptions = {
 const API_ROOT = "https://api.github.com";
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
+type Failure = Extract<RepoLookup, { kind: "rate_limited" | "budget_exhausted" | "upstream_error" }>;
+
 export async function lookupPublicRepository(
   { owner, name }: { owner: string; name: string },
   opts: LookupOptions = {},
 ): Promise<RepoLookup> {
+  const got = await githubGet(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, opts);
+  if ("kind" in got) return got;
+  const { res, body, message } = got;
+
+  if (res.status === 404) return { kind: "not_found" };
+  if (!res.ok) return failure(res, message);
+  if (!isGitHubRepo(body)) {
+    return { kind: "upstream_error", status: res.status, message: "Unexpected response from GitHub" };
+  }
+  if (body.private) return { kind: "private" };
+  return { kind: "ok", repo: body };
+}
+
+export type ItemCount = { kind: "ok"; items: number } | Failure;
+
+/**
+ * Issues and pull requests the repository has opened, read as the number of the newest one:
+ * both share one sequence. Deleted and transferred items still count, so it errs high.
+ */
+export async function countIssuesAndPullRequests(fullName: string, opts: LookupOptions = {}): Promise<ItemCount> {
+  const [owner, name] = fullName.split("/");
+  const got = await githubGet(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues?state=all&sort=created&direction=desc&per_page=1`,
+    opts,
+  );
+  if ("kind" in got) return got;
+  const { res, body, message } = got;
+
+  // 410: issues are turned off, and the issue listing that extraction reads is empty too.
+  if (res.status === 410) return { kind: "ok", items: 0 };
+  if (!res.ok) return failure(res, message);
+  if (!Array.isArray(body)) return { kind: "upstream_error", status: res.status, message: "Unexpected response from GitHub" };
+  const newest = body[0] as { number?: unknown } | undefined;
+  return { kind: "ok", items: typeof newest?.number === "number" ? newest.number : 0 };
+}
+
+/** One GET against the REST API, charged to the GitHub budget first. */
+async function githubGet(path: string, opts: LookupOptions): Promise<{ res: Response; body: unknown; message: string } | Failure> {
   // Resolve the global lazily so test stubs installed after import are honoured.
   const fetchImpl = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const headers: Record<string, string> = {
@@ -56,27 +96,20 @@ export async function lookupPublicRepository(
 
   let res: Response;
   try {
-    const url = `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
-    res = await fetchImpl(url, { headers });
+    res = await fetchImpl(`${API_ROOT}${path}`, { headers });
   } catch (err) {
     return { kind: "upstream_error", status: 0, message: errorMessage(err) };
   }
-
   const body = await readJson(res);
-  const message = messageOf(body) || `GitHub responded ${res.status}`;
+  return { res, body, message: messageOf(body) || `GitHub responded ${res.status}` };
+}
 
-  if (res.status === 404) return { kind: "not_found" };
+function failure(res: Response, message: string): Failure {
   if (res.status === 403 || res.status === 429) {
     const wait = rateLimitWait(res, message);
     if (wait !== null) return { kind: "rate_limited", retryAfterSeconds: wait };
-    return { kind: "upstream_error", status: res.status, message };
   }
-  if (!res.ok) return { kind: "upstream_error", status: res.status, message };
-  if (!isGitHubRepo(body)) {
-    return { kind: "upstream_error", status: res.status, message: "Unexpected response from GitHub" };
-  }
-  if (body.private) return { kind: "private" };
-  return { kind: "ok", repo: body };
+  return { kind: "upstream_error", status: res.status, message };
 }
 
 export function rateLimitWait(res: Response, message: string): number | null {
