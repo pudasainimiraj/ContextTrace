@@ -54,7 +54,8 @@
   --control-md: 40px;
   --control-sm: 32px;
   --header-h: 48px;
-  --content-max: 1440px;
+  --page-max: 1440px; /* header */
+  --content-max: 1000px; /* main and footer: 760 px plus about 30% */
   --reading-max: 880px;
   --gutter: 16px;
   --empty-max: 384px;
