@@ -1,6 +1,6 @@
 // A small inline icon set (Lucide geometry, ISC): 1em, stroke-based, decorative unless labelled.
 
-export type IconName = "external-link" | "arrow-left" | "arrow-right" | "search" | "alert-triangle" | "inbox" | "copy" | "check" | "chevron-down" | "chevron-up" | "message-square" | "git-pull-request";
+export type IconName = "external-link" | "arrow-left" | "arrow-right" | "search" | "alert-triangle" | "inbox" | "copy" | "check" | "chevron-down" | "chevron-up" | "message-square" | "git-pull-request" | "trace";
 
 const PATHS: Record<IconName, string> = {
   "external-link": '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
@@ -15,6 +15,8 @@ const PATHS: Record<IconName, string> = {
   "chevron-up": '<path d="m18 15-6-6-6 6"/>',
   "message-square": '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   "git-pull-request": '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/>',
+  // The brand mark (ContextTrace's own): a line of code traced back to the discussion it came from.
+  trace: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9"/><path d="M8.5 5H12a3.5 3.5 0 0 1 3.5 3.5v1"/>',
 };
 
 type Props = { name: IconName; size?: number; label?: string; className?: string };

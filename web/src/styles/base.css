@@ -1,26 +1,28 @@
 /* Tokens and globals. Colours are ContextTrace's own; the scales follow the house rules:
    a 4 px grid, a 12 to 36 px type scale with 14 px body and 12 px meta, 4/6/8 px radii,
    40 px controls (32 px inline, 40 px at 2xl), 0.15 to 0.25 s eased motion. */
+/* The "Trace" palette: dark only. Cyan is the trace from code back to discussion; amber marks the matched passage. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --bg-soft: #f6f5f8;
-  --border: #e5e4e7;
-  --accent: #8f2be0;
-  --accent-fg: #fff;
-  --accent-bg: rgba(143, 43, 224, 0.1);
-  --error: #b42318;
-  --green: #0f7a3c;
-  --green-bg: rgba(15, 122, 60, 0.1);
-  --amber: #9a5b00;
-  --amber-bg: rgba(154, 91, 0, 0.12);
-  --red: #b42318;
-  --red-bg: rgba(180, 35, 24, 0.1);
-  --muted: #7a7580;
-  --muted-bg: rgba(122, 117, 128, 0.12);
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --text: #9aa7c0;
+  --text-h: #eaf0ff;
+  --bg: #0b1020;
+  --bg-soft: #121a2e;
+  --border: #26304a;
+  --accent: #22d3ee;
+  --accent-fg: #04141a;
+  --accent-bg: rgba(34, 211, 238, 0.12);
+  --error: #f87171;
+  --green: #34d399;
+  --green-bg: rgba(52, 211, 153, 0.14);
+  --amber: #fbbf24;
+  --amber-bg: rgba(251, 191, 36, 0.12);
+  --red: #f87171;
+  --red-bg: rgba(248, 113, 113, 0.14);
+  --muted: #7d89a3;
+  --muted-bg: rgba(125, 137, 163, 0.16);
+  /* The CSP allows fonts from the site only, so the named faces apply when installed locally. */
+  --sans: 'IBM Plex Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -45,9 +47,9 @@
   --radius-lg: 8px;
   --radius-full: 999px;
 
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.08);
-  --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.08);
-  --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.5);
 
   --control-md: 40px;
   --control-sm: 32px;
@@ -60,35 +62,10 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 
   font: var(--text-sm) / 1.5 var(--sans);
-  color-scheme: light dark;
+  color-scheme: dark;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --bg-soft: #1d1e26;
-    --border: #2e303a;
-    --accent: #c084fc;
-    --accent-fg: #16171d;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --error: #f97066;
-    --green: #4ade80;
-    --green-bg: rgba(74, 222, 128, 0.14);
-    --amber: #fbbf24;
-    --amber-bg: rgba(251, 191, 36, 0.14);
-    --red: #f97066;
-    --red-bg: rgba(249, 112, 102, 0.14);
-    --muted: #8b8f9a;
-    --muted-bg: rgba(139, 143, 154, 0.16);
-    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
-    --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.4);
-    --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.5);
-  }
 }
 
 /* The compact set is the default; 2xl steps up. */
@@ -148,6 +125,16 @@ p {
 
 a {
   color: var(--accent);
+}
+
+/* Secondary links (header nav, footer) stay quiet; the accent is for the main path. */
+a.quiet {
+  color: var(--text);
+  text-decoration: none;
+}
+
+a.quiet:hover {
+  color: var(--text-h);
 }
 
 ul,

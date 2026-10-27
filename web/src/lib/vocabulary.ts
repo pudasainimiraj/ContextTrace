@@ -71,15 +71,18 @@ const ERROR_WORDS: Record<string, string> = {
   upstream_error: "GitHub had a problem",
   db_unavailable: "the database was unavailable",
   statement_timeout: "the database timed out",
+  db_error: "a database problem",
+  internal_error: "an internal problem",
+  unhandled: "an internal problem",
   unknown_kind: "an unknown step",
   repository_missing: "the repository row is missing",
 };
 
-/** An error code (or "code: message") in plain words. */
+/** An error code (or "code: message") in plain words. Unknown codes stay in the operator details only. */
 export function errorInWords(codeOrMessage: string | null): string {
   if (!codeOrMessage) return "an unknown problem";
   const code = codeOrMessage.split(":")[0].trim();
-  return ERROR_WORDS[code] ?? code.replace(/_/g, " ");
+  return ERROR_WORDS[code] ?? "an unexpected problem";
 }
 
 function capitalize(s: string): string {
@@ -137,7 +140,7 @@ export function jobSentence(job: ActiveJob, streams?: StreamCoverage[], now = Da
     case "retry_pending": {
       const at = job.next_attempt_at ? ` ${relativeTime(job.next_attempt_at, now)}` : "";
       if (job.error_code === "budget_exhausted") return `${verb} is paused${job.next_attempt_at ? ` until ${absoluteUtc(job.next_attempt_at)}` : ""}: a free-tier allowance is used up`;
-      return `${verb} will retry${at} (${errorInWords(job.error_code)})`;
+      return `${verb} will retry${at} after ${errorInWords(job.error_code)}`;
     }
   }
 }

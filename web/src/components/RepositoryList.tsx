@@ -25,17 +25,20 @@ function RepositoryRow({ repo, now }: { repo: RepositorySummary; now: number }) 
   });
   const muted = repo.status === "inaccessible" || repo.status === "removed";
   const stalled = repo.status === "registered" && repo.active_jobs.length === 0;
-  const searchable = repo.status === "searchable" || repo.status === "searchable_partial" || repo.status === "inaccessible";
   const again = repo.status === "removed" || repo.status === "inaccessible" || stalled;
   const pct = searchablePercent(repo.embedded, repo.pending);
   const path = repositoryPath(repo.full_name);
   return (
     <li className={`repo-row${muted ? " muted" : ""}`}>
       <div className="repo-main">
+        {/* The name's link stretches over the whole row; "Register again" sits above it. */}
         <Link to={path} className="repo-name truncate" title={repo.full_name}>
           {repo.full_name}
         </Link>
-        <StatusPill view={view} />
+        <span className="repo-end">
+          <StatusPill view={view} />
+          <Icon name="arrow-right" className="repo-go" />
+        </span>
       </div>
       <p className="meta">
         {formatCount(repo.passages)} passages ·{" "}
@@ -48,17 +51,13 @@ function RepositoryRow({ repo, now }: { repo: RepositorySummary; now: number }) 
           {repo.active_jobs.length > 1 ? ` · ${repo.active_jobs.length - 1} more` : ""}
         </p>
       )}
-      {pct !== null && repo.status !== "searchable" && (
+      {/* At 100% the pill alone says older history is still coming; a full bar beside it read as a contradiction. */}
+      {pct !== null && pct < 100 && repo.status !== "searchable" && (
         <p className="meta bar">
           <progress value={repo.embedded} max={repo.embedded + repo.pending} aria-label="Share of fetched passages that are searchable" /> {pct}% searchable
         </p>
       )}
       <p className="repo-actions">
-        {searchable && (
-          <Link to={path} className="btn btn-ghost btn-sm">
-            Search <Icon name="arrow-right" />
-          </Link>
-        )}
         {again && (
           <Link to={`/?add=${encodeURIComponent(repo.full_name)}`} className="btn btn-ghost btn-sm">
             Register again
