@@ -1,6 +1,6 @@
 // API errors in the user's words. The API message stays available as details.
 
-import type { ApiError } from "../../../shared/api.ts";
+import { type ApiError, MAX_ISSUES_AND_PULL_REQUESTS } from "../../../shared/api.ts";
 
 export type ErrorAction = "none" | "list" | "status" | "reload" | "retry" | "about" | "home";
 export type ErrorView = { copy: string; action: ErrorAction; retryAfterSeconds: number | null; details: string | null };
@@ -22,6 +22,11 @@ export function describeApiError(status: number, body: ApiError | null, retryAft
       return view("GitHub has no public repository at this address. Check the spelling. Private repositories cannot be indexed.");
     case "repository_not_public":
       return view("Only public repositories can be indexed.", "about");
+    case "repository_too_large":
+      return view(
+        `${body.message.replace(/;.*$/, "")}. ContextTrace is in beta and runs on a small free storage allowance. To leave room for about 15 repositories, it indexes only repositories with up to ${MAX_ISSUES_AND_PULL_REQUESTS} issues and pull requests for now.`,
+        "list",
+      );
     case "admissions_paused":
       return view(`${body.message.replace(/\.?$/, ".")} ${body.message.startsWith("Storage") ? "" : "You can search any repository in the list."}`.trim(), body.message.startsWith("Storage") ? "status" : "list");
     case "budget_exhausted":

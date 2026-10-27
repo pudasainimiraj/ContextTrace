@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type { RepositoryRecord } from "../../../shared/api.ts";
+import { MAX_ISSUES_AND_PULL_REQUESTS, type RepositoryRecord } from "../../../shared/api.ts";
 import { parseRepositoryInput } from "../../../shared/github-url.ts";
 import { api, postJson } from "../lib/api.ts";
 import type { ErrorView } from "../lib/errors.ts";
@@ -126,7 +126,7 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
   const indexed = existing !== null && existing.status !== "removed" && existing.status !== "inaccessible";
   const again = existing !== null && !indexed;
   const hint = !settled.trim()
-    ? "A URL, owner/name, or a git remote. We index issues, pull requests and their comments; never the code."
+    ? `A URL, owner/name, or a git remote. We index issues, pull requests and their comments; never the code. During the beta, a repository can have up to ${MAX_ISSUES_AND_PULL_REQUESTS} issues and pull requests.`
     : parsed && !parsed.ok
       ? parsed.error
       : indexed

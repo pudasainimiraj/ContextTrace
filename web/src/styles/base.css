@@ -54,7 +54,9 @@
   --control-md: 40px;
   --control-sm: 32px;
   --header-h: 48px;
-  --content-max: 760px;
+  --content-max: 1440px;
+  --reading-max: 880px;
+  --gutter: 16px;
   --empty-max: 384px;
 
   --dur-fast: 0.15s;
@@ -69,9 +71,16 @@
 }
 
 /* The compact set is the default; 2xl steps up. */
+@media (min-width: 768px) {
+  :root {
+    --gutter: 32px;
+  }
+}
+
 @media (min-width: 1536px) {
   :root {
     --control-sm: 40px;
+    --gutter: 48px;
   }
 }
 
@@ -173,11 +182,13 @@ h3:focus {
   font-size: var(--text-sm);
   color: var(--text);
   margin-top: var(--space-1);
+  max-width: 72ch;
 }
 
 .lede {
   font-size: var(--text-md);
   margin-top: var(--space-2);
+  max-width: 72ch;
 }
 
 .truncate {

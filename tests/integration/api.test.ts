@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { JobRecord, RepositoryRecord } from "../../shared/api.ts";
+import { type JobRecord, MAX_ISSUES_AND_PULL_REQUESTS, type RepositoryRecord } from "../../shared/api.ts";
 import { createDb, upsertRepository } from "../../worker/src/api/repositories.ts";
 import { jsonResponse, repoFixture } from "./helpers.ts";
 
@@ -13,6 +13,7 @@ const ID_RENAMED = ID_DAGSTER + 1;
 const ID_PRIVATE = ID_DAGSTER + 2;
 const ID_MISSING = ID_DAGSTER + 3;
 const ID_NOJOBS = ID_DAGSTER + 4;
+const ID_BIG = ID_DAGSTER + 5;
 
 type FetchInput = Parameters<typeof globalThis.fetch>[0];
 type FetchInit = Parameters<typeof globalThis.fetch>[1];
@@ -31,6 +32,10 @@ const fakeGitHub = vi.fn<typeof globalThis.fetch>(async (input) => {
     case "/repos/old-org/old-name": // GitHub redirects to the new name; fetch follows it
     case "/repos/new-org/new-name":
       return jsonResponse(200, repoFixture({ id: ID_RENAMED, full_name: "new-org/new-name" }));
+    case "/repos/big/big":
+      return jsonResponse(200, repoFixture({ id: ID_BIG, full_name: "big/big" }));
+    case "/repos/big/big/issues":
+      return jsonResponse(200, [{ number: MAX_ISSUES_AND_PULL_REQUESTS + 1 }]);
     case "/repos/secret/secret":
       return jsonResponse(200, repoFixture({ id: ID_PRIVATE, full_name: "secret/secret", private: true }));
     case "/repos/limited/limited":
@@ -62,7 +67,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 afterAll(async () => {
-  await createDb(env).from("repositories").delete().in("id", [ID_DAGSTER, ID_RENAMED, ID_NOJOBS]);
+  await createDb(env).from("repositories").delete().in("id", [ID_DAGSTER, ID_RENAMED, ID_NOJOBS, ID_BIG]);
 });
 
 function post(url: unknown, rawBody?: string): Promise<Response> {
@@ -217,6 +222,13 @@ describe.skipIf(!env.SUPABASE_SECRET_KEY)("POST /api/repositories", () => {
     const res = await post("secret/secret");
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: "repository_not_public" });
+  });
+
+  it("refuses a new repository with more issues and pull requests than the beta limit", async () => {
+    const res = await post("big/big");
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: "repository_too_large", message: expect.stringContaining("about 501 issues and pull requests") });
+    expect((await get(`/api/repositories/${ID_BIG}`)).status).toBe(404);
   });
 
   it("reports GitHub rate limiting with Retry-After", async () => {

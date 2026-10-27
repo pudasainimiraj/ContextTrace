@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { lookupPublicRepository } from "../../worker/src/api/github-api.ts";
+import { countIssuesAndPullRequests, lookupPublicRepository } from "../../worker/src/api/github-api.ts";
 import { jsonResponse, repoFixture } from "./helpers.ts";
 
 const DAGSTER = { owner: "dagster-io", name: "dagster" };
@@ -103,5 +103,24 @@ describe("lookupPublicRepository", () => {
     const withoutToken = stubFetch(jsonResponse(200, repoFixture()));
     await lookupPublicRepository(DAGSTER, { fetch: withoutToken });
     expect(new Headers(withoutToken.mock.calls[0][1]?.headers).get("Authorization")).toBeNull();
+  });
+});
+
+describe("countIssuesAndPullRequests", () => {
+  it("reads the newest issue or pull request number", async () => {
+    const fetch = stubFetch(jsonResponse(200, [{ number: 742 }]));
+    expect(await countIssuesAndPullRequests("dagster-io/dagster", { fetch })).toEqual({ kind: "ok", items: 742 });
+    expect(fetch.mock.calls[0][0]).toBe("https://api.github.com/repos/dagster-io/dagster/issues?state=all&sort=created&direction=desc&per_page=1");
+  });
+
+  it("counts zero for an empty list or turned-off issues", async () => {
+    expect(await countIssuesAndPullRequests("a/b", { fetch: stubFetch(jsonResponse(200, [])) })).toEqual({ kind: "ok", items: 0 });
+    expect(await countIssuesAndPullRequests("a/b", { fetch: stubFetch(jsonResponse(410, { message: "Issues are disabled" })) })).toEqual({ kind: "ok", items: 0 });
+  });
+
+  it("returns rate_limited and upstream_error like the lookup", async () => {
+    const limited = jsonResponse(403, { message: "API rate limit exceeded" }, { "Retry-After": "7" });
+    expect(await countIssuesAndPullRequests("a/b", { fetch: stubFetch(limited) })).toEqual({ kind: "rate_limited", retryAfterSeconds: 7 });
+    expect(await countIssuesAndPullRequests("a/b", { fetch: stubFetch(jsonResponse(200, { hello: "world" })) })).toMatchObject({ kind: "upstream_error" });
   });
 });

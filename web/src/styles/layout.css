@@ -2,7 +2,7 @@ header.site {
   max-width: var(--content-max);
   min-height: var(--header-h);
   margin: 0 auto;
-  padding: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2) var(--gutter) 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -37,13 +37,13 @@ header.site nav {
 main {
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-6) var(--space-4) var(--space-10);
+  padding: var(--space-6) var(--gutter) var(--space-10);
 }
 
 footer.site {
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-4) var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--gutter) var(--space-8);
   border-top: 1px solid var(--border);
 }
 
@@ -64,7 +64,8 @@ main > * + .section,
 }
 
 .section-head .description {
-  flex-basis: 100%;
+  flex: 1 0 100%;
+  max-width: none;
   margin-top: 0;
 }
 

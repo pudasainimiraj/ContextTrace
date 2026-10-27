@@ -1,4 +1,4 @@
-import type { ApiError, RepositoryListResponse, ServiceStatus, SourceType } from "../../shared/api.ts";
+import { type ApiError, MAX_ISSUES_AND_PULL_REQUESTS, type RepositoryListResponse, type ServiceStatus, type SourceType } from "../../shared/api.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "./api/admin.ts";
 import { admissionState, findByFullName, MAX_REPOSITORIES } from "./api/admission.ts";
@@ -6,7 +6,7 @@ import { Budget, budgetExhausted as budgetExhaustedError, GLOBAL_SCOPE, retryAft
 import { consumeJobMessage } from "./queue/consumer.ts";
 import { getCoverage, listRepositorySummaries, pausedUntil } from "./api/coverage.ts";
 import { allowedOrigin, preflightResponse, withCors } from "./api/cors.ts";
-import { lookupPublicRepository, type RepoLookup } from "./api/github-api.ts";
+import { countIssuesAndPullRequests, lookupPublicRepository, type RepoLookup } from "./api/github-api.ts";
 import { parseRepositoryInput } from "./api/github-url.ts";
 import { createJob, enqueueJob, hasFetchJobs, type JobMessage, type JobQueue, meteredQueue } from "./queue/jobs.ts";
 import { maintain, removeRepository, storageState } from "./cron/maintenance.ts";
@@ -215,6 +215,19 @@ async function submitRepository(request: Request, app: App): Promise<Response> {
   if (lookup.kind !== "ok") {
     await budget.settle("registrations", -1);
     return lookupError(lookup);
+  }
+  // Only a new repository is measured; one already registered (by GitHub id) is never turned away.
+  if (!(await getRepository(db, lookup.repo.id))) {
+    const count = await countIssuesAndPullRequests(lookup.repo.full_name, { token: env.GITHUB_TOKEN || undefined, budget });
+    if (count.kind !== "ok" || count.items > MAX_ISSUES_AND_PULL_REQUESTS) {
+      await budget.settle("registrations", -1);
+      if (count.kind !== "ok") return lookupError(count);
+      return error(
+        422,
+        "repository_too_large",
+        `${lookup.repo.full_name} has about ${count.items.toLocaleString("en-US")} issues and pull requests; during the beta the limit is ${MAX_ISSUES_AND_PULL_REQUESTS}`,
+      );
+    }
   }
 
   const upserted = await upsertRepository(db, lookup.repo);
