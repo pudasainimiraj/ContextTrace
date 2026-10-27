@@ -1,5 +1,5 @@
 header.site {
-  max-width: var(--content-max);
+  max-width: var(--page-max);
   min-height: var(--header-h);
   margin: 0 auto;
   padding: var(--space-2) var(--gutter) 0;
