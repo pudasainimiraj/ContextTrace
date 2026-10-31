@@ -24,7 +24,7 @@ export function describeApiError(status: number, body: ApiError | null, retryAft
       return view("Only public repositories can be indexed.", "about");
     case "repository_too_large":
       return view(
-        `${body.message.replace(/;.*$/, "")}. ContextTrace is in beta and runs on a small free storage allowance. To leave room for about 15 repositories, it indexes only repositories with up to ${MAX_ISSUES_AND_PULL_REQUESTS} issues and pull requests for now.`,
+        `${body.message.replace(/;.*$/, "")}. ContextTrace is in beta and runs on a small free storage allowance. To leave room for other repositories, it indexes only repositories with up to ${MAX_ISSUES_AND_PULL_REQUESTS} issues and pull requests for now.`,
         "list",
       );
     case "admissions_paused":
@@ -48,7 +48,7 @@ export function describeApiError(status: number, body: ApiError | null, retryAft
       return view("GitHub had a problem answering; it has been logged.", "retry");
   }
   if (status >= 500) return view("The service had a problem; it has been logged.", "retry");
-  return view(body?.message ?? `Request failed (${status})`);
+  return body ? view(body.message) : view("The request did not complete. Try again.", "retry");
 }
 
 /** Parses an error body, tolerating one that is not JSON. */

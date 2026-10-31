@@ -40,7 +40,7 @@ export function repositoryStatus(status: RepositoryStatus, ctx: StatusContext = 
     case "registered":
       if (ctx.activeJobs === 0) {
         const reason = ctx.lastError ? errorInWords(ctx.lastError) : "no indexing step is queued or running";
-        return { label: "Indexing stopped", tone: "red", pulse: false, hollow: false, meaning: `${capitalize(reason)}. Indexing did not start, or it stopped. Register the repository again to restart it.` };
+        return { label: "Indexing stopped", tone: "red", pulse: false, hollow: false, meaning: `${capitalize(reason)}. Indexing did not start, or it stopped. Add the repository again to restart it.` };
       }
       return { label: "Queued for indexing", tone: "neutral", pulse: true, hollow: true, meaning: "Nothing is searchable yet. The newest discussions arrive within about a minute." };
     case "searchable_partial":
@@ -58,7 +58,7 @@ export function repositoryStatus(status: RepositoryStatus, ctx: StatusContext = 
       return { label: "Unreachable on GitHub", tone: "red", pulse: false, hollow: false, meaning: `GitHub stopped serving this repository${since}. The index stays searchable${until}; results may be stale.` };
     }
     case "removed":
-      return { label: "Index removed", tone: "muted", pulse: false, hollow: true, meaning: `The data was removed${since}. Register the repository again to rebuild the index.` };
+      return { label: "Index removed", tone: "muted", pulse: false, hollow: true, meaning: `The data was removed${since}. Add the repository again to rebuild the index.` };
   }
 }
 
@@ -197,8 +197,23 @@ export function latestReset(budgets: BudgetState[]): string | null {
 }
 
 /** Four words for the header: what the service is doing about its free tier right now. */
-export function stripView(status: ServiceStatus | null): { label: string; tone: Tone } {
-  if (!status) return { label: "Checking the service status", tone: "muted" };
+const RESOURCE_NAMES: Record<string, string> = {
+  ai_neurons_milli: "Embeddings today",
+  github_requests_auth: "GitHub requests this hour",
+  github_requests_anon: "GitHub requests this hour (without a token)",
+  queue_ops: "Indexing steps today",
+  searches: "Searches today",
+  registrations: "New repositories today",
+  db_egress_bytes: "Data transfer this month",
+  storage_bytes: "Storage",
+};
+
+export function resourceName(b: BudgetState): string {
+  return RESOURCE_NAMES[b.resource] ?? `${b.resource.replace(/_/g, " ")} (${b.period})`;
+}
+
+export function stripView(status: ServiceStatus | null, failed = false): { label: string; tone: Tone } {
+  if (!status) return { label: failed ? "Service status unavailable" : "Checking the service status", tone: "muted" };
   if (status.paused) {
     const until = latestReset(status.budgets);
     return { label: until ? `Paused until ${absoluteUtc(until)}` : "Paused at a free-tier budget", tone: "amber" };

@@ -1,23 +1,9 @@
-import type { BudgetState } from "../../../shared/api.ts";
-import { absoluteUtc, formatCount, humanizeTimes, relativeTime } from "../lib/time.ts";
+import type { BudgetState, ServiceStatus } from "../../../shared/api.ts";
+import { StateBlock } from "../components/StateBlock.tsx";
+import { absoluteUtc, formatCount, relativeTime } from "../lib/time.ts";
 import { useNow } from "../lib/polling.ts";
-import { useServiceStatus } from "../lib/service-status.ts";
-import { stripView } from "../lib/vocabulary.ts";
-
-const RESOURCE_NAMES: Record<string, string> = {
-  ai_neurons_milli: "Embeddings today",
-  github_requests_auth: "GitHub requests this hour",
-  github_requests_anon: "GitHub requests this hour (without a token)",
-  queue_ops: "Indexing steps today",
-  searches: "Searches today",
-  registrations: "New repositories today",
-  db_egress_bytes: "Data transfer this month",
-  storage_bytes: "Storage",
-};
-
-function resourceName(b: BudgetState): string {
-  return RESOURCE_NAMES[b.resource] ?? `${b.resource.replace(/_/g, " ")} (${b.period})`;
-}
+import { useServiceStatusPoll } from "../lib/service-status.ts";
+import { resourceName, stripView } from "../lib/vocabulary.ts";
 
 function amount(b: BudgetState, n: number): string {
   if (b.resource.endsWith("_bytes")) return n >= 1_000_000_000 ? `${(n / 1_000_000_000).toFixed(1)} GB` : `${(n / 1_000_000).toFixed(n >= 100_000_000 ? 0 : 1)} MB`;
@@ -25,10 +11,18 @@ function amount(b: BudgetState, n: number): string {
   return formatCount(n);
 }
 
+/** The API's deferral reasons are operator text; this says the same in the page's words. */
+function deferredInWords(reason: string, status: ServiceStatus): string {
+  if (reason.startsWith("queue")) return "Today's indexing steps are almost used up. Checks for new discussions, older history and rescans wait until the reset.";
+  const pct = Math.round((status.storage.used / status.storage.limit) * 100);
+  const waiting = status.storage.level === "critical" ? "Checks for new discussions, older history and rescans" : "Older history and rescans";
+  return `Storage is at ${formatCount(pct)}% of its allowance. ${waiting} wait until space is freed.`;
+}
+
 export default function StatusPage() {
-  const status = useServiceStatus();
+  const { data: status, error, reload } = useServiceStatusPoll();
   const now = useNow(30_000);
-  const strip = stripView(status);
+  const strip = stripView(status, error !== null);
   return (
     <>
       <h1 id="page-title" tabIndex={-1}>
@@ -40,7 +34,19 @@ export default function StatusPage() {
       <p className="lede">
         ContextTrace runs entirely on free tiers and keeps itself at 80% of each allowance. When an allowance is used up, indexing waits and resumes by itself, and search falls back to keywords. Nothing ever creates a charge.
       </p>
-      {!status && <p className="meta">Loading…</p>}
+      {!status && !error && <p className="meta">Loading…</p>}
+      {!status && error && (
+        <StateBlock
+          kind="error"
+          title="Couldn't load the service status"
+          hint={error.copy}
+          action={
+            <button type="button" className="btn btn-secondary btn-sm" onClick={reload}>
+              Retry
+            </button>
+          }
+        />
+      )}
       {status && (
         <>
           {status.paused && (
@@ -49,9 +55,13 @@ export default function StatusPage() {
                 <h2 id="paused-title">Paused</h2>
               </div>
               <ul>
-                {status.reasons.map((r) => (
-                  <li key={r}>{humanizeTimes(r)}</li>
-                ))}
+                {status.budgets
+                  .filter((b) => b.paused)
+                  .map((b) => (
+                    <li key={b.resource}>
+                      {resourceName(b)}: {amount(b, b.used)} of {amount(b, b.limit)} used{b.resets_at ? `; resets ${relativeTime(b.resets_at, now)}` : ""}.
+                    </li>
+                  ))}
               </ul>
             </section>
           )}
@@ -62,7 +72,7 @@ export default function StatusPage() {
               </div>
               <ul>
                 {status.deferred.map((r) => (
-                  <li key={r}>{humanizeTimes(r)}</li>
+                  <li key={r}>{deferredInWords(r, status)}</li>
                 ))}
               </ul>
             </section>
@@ -97,8 +107,8 @@ export default function StatusPage() {
               <h2 id="protections-title">Protections</h2>
             </div>
             <ul>
-              <li>Bot check on registration: {status.protections.turnstile ? "on" : "off"}</li>
-              <li>Rate limits per address: {status.protections.rate_limits ? "on (30 searches, 5 registrations, 120 reads a minute)" : "off"}</li>
+              <li>Bot check when adding a repository: {status.protections.turnstile ? "on" : "off"}</li>
+              <li>Rate limits per address: {status.protections.rate_limits ? "on (30 searches, 5 new repositories, 120 reads a minute)" : "off"}</li>
               <li>Operator actions require a token: {status.protections.admin ? "yes" : "no"}</li>
             </ul>
           </section>
@@ -108,7 +118,7 @@ export default function StatusPage() {
             </div>
             <ul>
               <li>25 repositories at a time.</li>
-              <li>5,000 items per stream (issues and pull requests, issue comments, review comments).</li>
+              <li>5,000 items of each kind (issues and pull requests, issue comments, review comments).</li>
               <li>New discussions every hour; deletions within a week.</li>
               <li>A repository GitHub stops serving is kept for 30 days.</li>
             </ul>

@@ -8,7 +8,7 @@ input {
   width: 100%;
   height: var(--control-md);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text-h);
@@ -32,7 +32,7 @@ input.input-sm {
   font-size: var(--text-xs);
 }
 
-/* Buttons: primary (solid), secondary (outline), ghost (transparent, scales on hover). */
+/* Buttons: primary (solid), secondary (outline), ghost (transparent). */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -59,18 +59,10 @@ input.input-sm {
   color: var(--accent-fg);
 }
 
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.92;
-}
-
 .btn-secondary {
   background: var(--bg);
   color: var(--text-h);
-  border-color: var(--border);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--accent-bg);
+  border-color: var(--border-control);
 }
 
 .btn-ghost {
@@ -79,8 +71,15 @@ input.input-sm {
   padding: 0 var(--space-2);
 }
 
-.btn-ghost:hover:not(:disabled) {
-  transform: scale(1.05);
+/* Hover only where a pointer hovers; on touch a tapped control would keep the tint. */
+@media (hover: hover) {
+  .btn-primary:hover:not(:disabled) {
+    opacity: 0.92;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--accent-bg);
+  }
 }
 
 .btn:disabled {
@@ -184,7 +183,7 @@ input.input-sm {
   gap: 6px;
   padding: 4px 12px;
   border-radius: var(--radius-full);
-  font: 600 0.7rem / 1 var(--sans);
+  font: 600 var(--text-xs) / 1 var(--sans);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -223,8 +222,10 @@ input.input-sm {
   transition: color var(--dur-fast) ease;
 }
 
-.strip:hover {
-  color: var(--text-h);
+@media (hover: hover) {
+  .strip:hover {
+    color: var(--text-h);
+  }
 }
 
 .strip .dot {
@@ -457,12 +458,19 @@ details > summary {
   border-top: none;
 }
 
-.repo-row:hover {
-  background: var(--bg-soft);
+@media (hover: hover) {
+  .repo-row:hover {
+    background: var(--bg-soft);
+  }
+
+  .repo-row:hover .repo-go {
+    color: var(--accent);
+  }
 }
 
-.repo-row.muted {
-  opacity: 0.7;
+/* Muted by colour, not opacity, so the row's text keeps its contrast. */
+.repo-row.muted .repo-name {
+  color: var(--text);
 }
 
 .repo-main {
@@ -478,6 +486,7 @@ details > summary {
   color: var(--text-h);
   text-decoration: none;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .repo-name::after {
@@ -505,12 +514,7 @@ details > summary {
 
 .repo-go {
   color: var(--muted);
-  transition: color var(--dur-fast) ease, transform var(--dur-fast) ease;
-}
-
-.repo-row:hover .repo-go {
-  color: var(--accent);
-  transform: translateX(2px);
+  transition: color var(--dur-fast) ease;
 }
 
 .repo-actions a {
@@ -728,12 +732,6 @@ dd {
   background: var(--bg-soft);
   display: grid;
   gap: var(--space-2);
-  transition: box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease;
-}
-
-.card:hover {
-  box-shadow: var(--shadow-soft);
-  border-color: var(--accent);
 }
 
 .card.skeleton {
@@ -764,8 +762,10 @@ dd {
   overflow-wrap: anywhere;
 }
 
-.card-title:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .card-title:hover {
+    color: var(--accent);
+  }
 }
 
 .excerpt {
@@ -786,8 +786,10 @@ dd {
   color: var(--text);
 }
 
-.card-actions .btn-ghost:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .card-actions .btn-ghost:hover {
+    color: var(--accent);
+  }
 }
 
 .thread-more {
@@ -833,6 +835,11 @@ dd {
   .register-form input,
   .search-form input {
     flex: none;
+  }
+  /* 16 px or more, or iOS zooms the page on focus. */
+  input,
+  input.input-sm {
+    font-size: var(--text-md);
   }
   .pipeline {
     grid-template-columns: 1fr;

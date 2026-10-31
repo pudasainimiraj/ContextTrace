@@ -8,6 +8,8 @@
   --bg: #0b1020;
   --bg-soft: #121a2e;
   --border: #26304a;
+  /* Input and outline-button edges: 3:1 against --bg and --bg-soft, which a divider does not need. */
+  --border-control: #5b6884;
   --accent: #22d3ee;
   --accent-fg: #04141a;
   --accent-bg: rgba(34, 211, 238, 0.12);
@@ -18,7 +20,7 @@
   --amber-bg: rgba(251, 191, 36, 0.12);
   --red: #f87171;
   --red-bg: rgba(248, 113, 113, 0.14);
-  --muted: #7d89a3;
+  --muted: #8e9ab4;
   --muted-bg: rgba(125, 137, 163, 0.16);
   /* The CSP allows fonts from the site only, so the named faces apply when installed locally. */
   --sans: 'IBM Plex Sans', system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -49,7 +51,6 @@
 
   --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4);
   --shadow-raised: 0 8px 32px rgba(0, 0, 0, 0.4);
-  --shadow-soft: 0 0 8px rgba(0, 0, 0, 0.5);
 
   --control-md: 40px;
   --control-sm: 32px;

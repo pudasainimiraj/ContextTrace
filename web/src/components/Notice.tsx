@@ -58,10 +58,11 @@ export function ErrorNotice({ error, onRetry }: { error: ErrorView; onRetry?: ()
   }
   return (
     <div className="error-notice fade-in">
-      <div role="alert" className="notice tone-red">
+      {/* The alert holds the copy only, so the retry countdown is not announced every second. */}
+      <div className="notice tone-red">
         <Icon name="alert-triangle" />
         <span className="notice-body">
-          <span>{error.copy}</span>
+          <span role="alert">{error.copy}</span>
           {action}
         </span>
       </div>

@@ -64,11 +64,11 @@ export default function HomePage() {
 
       <section aria-labelledby="repositories-title" id="repositories" className="section">
         <div className="section-head">
-          <h2 id="repositories-title">Already indexed{capacity ? ` (${capacity.used} of ${capacity.max})` : ""}</h2>
+          <h2 id="repositories-title">Repositories{capacity ? ` (${capacity.used} of ${capacity.max})` : ""}</h2>
           {repositories.length > 3 && (
             <input type="search" className="input-sm" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter" aria-label="Filter the repositories by name" />
           )}
-          <p className="description">Every repository below can be searched now. Working ones are listed first.</p>
+          <p className="description">Each row shows whether the repository can be searched. Working ones are listed first.</p>
         </div>
         {list.loading && !list.error && <SkeletonRows rows={3} />}
         {list.error && (
@@ -92,7 +92,7 @@ export default function HomePage() {
           <p className={`meta capacity${full ? " full" : ""}`}>
             <progress value={capacity.used} max={capacity.max} aria-label="Repositories registered, of the maximum" />
             <span>
-              {capacity.used} of {capacity.max} repositories{full ? ". The service is full; every listed repository can still be searched." : ""}
+              {capacity.used} of {capacity.max} repositories{full ? ". The service is full and accepts no new repositories for now. Search a repository above in the meantime." : ""}
             </span>
           </p>
         )}
