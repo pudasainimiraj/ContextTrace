@@ -31,8 +31,8 @@ function RepositoryRow({ repo, now }: { repo: RepositorySummary; now: number }) 
   return (
     <li className={`repo-row${muted ? " muted" : ""}`}>
       <div className="repo-main">
-        {/* The name's link stretches over the whole row; "Register again" sits above it. */}
-        <Link to={path} className="repo-name truncate" title={repo.full_name}>
+        {/* The name's link stretches over the whole row; "Add again" sits above it. */}
+        <Link to={path} className="repo-name">
           {repo.full_name}
         </Link>
         <span className="repo-end">
@@ -60,7 +60,7 @@ function RepositoryRow({ repo, now }: { repo: RepositorySummary; now: number }) 
       <p className="repo-actions">
         {again && (
           <Link to={`/?add=${encodeURIComponent(repo.full_name)}`} className="btn btn-ghost btn-sm">
-            Register again
+            Add again
           </Link>
         )}
       </p>

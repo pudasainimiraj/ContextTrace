@@ -75,8 +75,10 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const onToken = useCallback((token: string | null) => setTurnstileToken(token), []);
   const inputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const needsToken = Boolean(TURNSTILE_SITE_KEY) && !turnstileToken;
 
-  // A new prefill (from "Register again") replaces the input and takes the focus.
+  // A new prefill (from "Add again") replaces the input and takes the focus.
   const [prevInitial, setPrevInitial] = useState(initial);
   if (initial !== prevInitial) {
     setPrevInitial(initial);
@@ -110,6 +112,10 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (needsToken) {
+      setPhase({ kind: "error", error: { copy: "Complete the bot check below, then add the repository.", action: "none", retryAfterSeconds: null, details: null } });
+      return;
+    }
     setPhase({ kind: "submitting" });
     const result = await api<RepositoryRecord>("/api/repositories", "register", postJson({ url, ...(turnstileToken ? { turnstileToken } : {}) }));
     // A Turnstile token is single-use: ask for a fresh one for the next submission.
@@ -123,7 +129,9 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
     onRegistered(result.value, result.status === 201);
   }
 
-  const indexed = existing !== null && existing.status !== "removed" && existing.status !== "inaccessible";
+  // A "registered" repository may have stalled; adding it again restarts it, and is a no-op while it is queued.
+  const waiting = existing !== null && existing.status === "registered";
+  const indexed = existing !== null && existing.status !== "removed" && existing.status !== "inaccessible" && !waiting;
   const again = existing !== null && !indexed;
   const hint = !settled.trim()
     ? `A URL, owner/name, or a git remote. We index issues, pull requests and their comments; never the code. During the beta, a repository can have up to ${MAX_ISSUES_AND_PULL_REQUESTS} issues and pull requests.`
@@ -131,15 +139,16 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
       ? parsed.error
       : indexed
         ? `${existing.full_name} is already indexed.`
-        : again
-          ? `${existing.full_name} was indexed before. Adding it again rebuilds the index.`
-          : `Looks like ${fullName}.`;
+        : waiting
+          ? `${existing.full_name} is waiting to be indexed. If indexing stopped, adding it again restarts it.`
+          : again
+            ? `${existing.full_name} was indexed before. Adding it again rebuilds the index.`
+            : `Looks like ${fullName}.`;
   const submitting = phase.kind === "submitting";
-  const needsToken = Boolean(TURNSTILE_SITE_KEY) && !turnstileToken;
 
   return (
     <div className="register">
-      <form onSubmit={onSubmit} className="register-form">
+      <form ref={formRef} onSubmit={onSubmit} className="register-form">
         <label className="sr-only" htmlFor="repo-url">
           GitHub repository URL or owner/name
         </label>
@@ -153,6 +162,7 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
           autoComplete="off"
           spellCheck={false}
           aria-describedby="repo-hint"
+          aria-invalid={parsed !== null && !parsed.ok ? true : undefined}
           required
         />
         {indexed ? (
@@ -160,9 +170,9 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
             Already indexed. Open <Icon name="arrow-right" />
           </Link>
         ) : (
-          <button type="submit" className="btn btn-primary" disabled={submitting || needsToken} title={needsToken ? "Complete the bot check first" : undefined}>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting && <Spinner size={20} />}
-            {submitting ? "Checking on GitHub…" : again ? "Register again" : "Add"}
+            {submitting ? "Checking on GitHub…" : again ? "Add again" : "Add"}
           </button>
         )}
       </form>
@@ -170,7 +180,7 @@ export function RegisterForm({ initial = "", onRegistered }: Props) {
         {hint}
       </p>
       <TurnstileWidget onToken={onToken} />
-      {phase.kind === "error" && <ErrorNotice error={phase.error} onRetry={() => setPhase({ kind: "idle" })} />}
+      {phase.kind === "error" && <ErrorNotice error={phase.error} onRetry={() => formRef.current?.requestSubmit()} />}
     </div>
   );
 }

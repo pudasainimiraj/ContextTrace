@@ -133,8 +133,10 @@ main > * + .section,
   transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
-.segment:hover {
-  background: var(--bg-soft);
+@media (hover: hover) {
+  .segment:hover {
+    background: var(--bg-soft);
+  }
 }
 
 .segment[aria-selected='true'] {

@@ -55,11 +55,6 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-/** Server sentences carry ISO timestamps; show them as "2026-10-17 00:00 UTC" instead. */
-export function humanizeTimes(text: string): string {
-  return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g, (iso) => absoluteUtc(iso));
-}
-
 /** The same instant some days later, as ISO. */
 export function addDays(iso: string, days: number): string {
   return new Date(Date.parse(iso) + days * DAY).toISOString();

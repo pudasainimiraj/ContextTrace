@@ -1,7 +1,7 @@
 import type { CoverageReport, ServiceStatus, StreamCoverage } from "../../../shared/api.ts";
 import { pipelineSteps } from "../lib/coverage.ts";
-import { absoluteUtc, formatCount, humanizeTimes, relativeTime } from "../lib/time.ts";
-import { cappedBadge, jobSentence, lastRunSentence, RESCAN_INTERVAL_MS, STREAM_NAMES, streamDot, streamSentence, SYNC_INTERVAL_MS } from "../lib/vocabulary.ts";
+import { absoluteUtc, formatCount, relativeTime } from "../lib/time.ts";
+import { cappedBadge, jobSentence, lastRunSentence, RESCAN_INTERVAL_MS, resourceName, STREAM_NAMES, streamDot, streamSentence, SYNC_INTERVAL_MS } from "../lib/vocabulary.ts";
 
 function newest(times: (string | null)[]): string | null {
   return times.filter((t): t is string => t !== null).reduce<string | null>((a, b) => (a === null || b > a ? b : a), null);
@@ -12,7 +12,7 @@ type Props = { coverage: CoverageReport; service: ServiceStatus | null; now: num
 export function IndexingPanel({ coverage: c, service, now }: Props) {
   const steps = pipelineSteps(c);
   const paused = c.paused_until !== null || c.active_jobs.some((j) => j.error_code === "budget_exhausted");
-  const pauseReasons = (service?.reasons ?? []).map(humanizeTimes);
+  const pauseReasons = (service?.budgets ?? []).filter((b) => b.paused).map((b) => resourceName(b).toLowerCase());
   const lastSync = c.last_successful_sync_at;
   const nextSync = lastSync ? new Date(Date.parse(lastSync) + SYNC_INTERVAL_MS).toISOString() : null;
   const lastRescan = newest(c.streams.map((s) => s.last_rescan_at));
@@ -61,7 +61,7 @@ export function IndexingPanel({ coverage: c, service, now }: Props) {
             ))}
           </ul>
         )}
-        {idle && c.status === "registered" && <p className="meta">Nothing is queued or running. Register the repository again to restart indexing.</p>}
+        {idle && c.status === "registered" && <p className="meta">Nothing is queued or running. Add the repository again to restart indexing.</p>}
         {idle && !terminal && c.status !== "registered" && (
           <p className="meta">Idle. {nextSync ? `The next check for new discussions is ${relativeTime(nextSync, now)}.` : "The next check for new discussions runs within an hour."}</p>
         )}

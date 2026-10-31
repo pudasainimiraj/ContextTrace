@@ -147,9 +147,7 @@ function RepositoryView({ repo }: { repo: RepositoryRecord }) {
       <Crumbs />
       <div className="repo-head">
         <h1 id="page-title" tabIndex={-1}>
-          <span className="truncate" title={repo.full_name}>
-            {repo.full_name}
-          </span>
+          <span>{repo.full_name}</span>
           <a className="ext" href={`https://github.com/${repo.full_name}`} target="_blank" rel="noreferrer" aria-label={`${repo.full_name} on GitHub`}>
             <Icon name="external-link" />
           </a>
